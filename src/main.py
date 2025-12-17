@@ -1,101 +1,102 @@
+#!/usr/bin/env python3
 """
-Módulo: src/main.py
-Descrição: Ponto de entrada (Entry Point) da aplicação CLI.
-Motivo da alteração: Adaptação para interface de Chat Médico, gerenciamento de histórico 
-e exibição de alertas de segurança/alucinação.
+Interface CLI para o Assistente Médico Virtual.
+Executa a aplicação de chat interativo.
 """
 
 import sys
-import uuid
-from typing import cast
+from pathlib import Path
+
+# Adicionar diretório raiz do projeto ao Python path
+project_root = Path(__file__).parent.parent.resolve()
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from loguru import logger
+from src.utils.logging import setup_logging
 from src.domain.state import AgentState
 from src.use_cases.graph import GraphBuilder
-from src.utils.logging import get_logger
 
-# Configuração de Logs (pode ajustar para DEBUG se quiser ver o "pensamento" do robô)
-logger = get_logger()
-
-def print_medical_disclaimer():
-    """Exibe o aviso legal obrigatório ao iniciar o sistema."""
-    print("\n" + "="*60)
-    print("🏥  ASSISTENTE VIRTUAL MÉDICO - SISTEMA DE APOIO À DECISÃO")
-    print("="*60)
-    print("⚠️  AVISO IMPORTANTE:")
-    print("Este sistema utiliza Inteligência Artificial baseada em protocolos internos.")
-    print("NÃO substitui o julgamento clínico profissional.")
-    print("Sempre valide as sugestões antes de aplicar qualquer conduta.")
-    print("="*60 + "\n")
 
 def main():
-    # 1. Exibe o Disclaimer
-    print_medical_disclaimer()
-
-    # 2. Inicializa o Sistema
-    print("⏳ Inicializando base de conhecimento e modelos... (Aguarde)")
+    """Inicia a interface CLI do assistente médico."""
+    setup_logging(level="INFO")
+    
+    print("\n" + "=" * 70)
+    print("🏥 MACHADO ORÁCULO - Assistente Médico Virtual")
+    print("=" * 70)
+    print("\n📋 Sistema de suporte a decisões clínicas baseado em protocolos internos")
+    print("Desenvolvido com LangChain + LangGraph + Google Gemini\n")
+    
     try:
-        app_graph = GraphBuilder().build()
-        print("✅ Sistema pronto! Base de protocolos carregada.")
+        # Construir grafo de orquestração
+        logger.info("🔨 Inicializando grafo de orquestração...")
+        graph_builder = GraphBuilder()
+        app = graph_builder.build()
+        logger.info("✅ Grafo inicializado com sucesso\n")
+        
+        # Loop interativo de chat
+        print("-" * 70)
+        print("💬 Digite suas dúvidas clínicas (ou 'sair' para encerrar)\n")
+        
+        while True:
+            try:
+                # Ler pergunta do usuário
+                question = input("👨‍⚕️  Você: ").strip()
+                
+                if question.lower() in ("sair", "exit", "quit", "q"):
+                    print("\n👋 Encerrando assistente médico. Até logo!\n")
+                    logger.info("🛑 Usuário encerrou a sessão")
+                    break
+                
+                if not question:
+                    print("⚠️  Digite uma pergunta válida\n")
+                    continue
+                
+                # Processar pergunta através do grafo
+                logger.debug(f"Processando pergunta: {question[:60]}...")
+                print("\n🔍 Processando pergunta...\n")
+                
+                initial_state: AgentState = {
+                    "medical_question": question,
+                    "is_safe": True,
+                    "documents": [],
+                    "generation": "",
+                    "hallucination_check": "",
+                }
+                
+                result = app.invoke(initial_state)
+                
+                # Exibir resposta
+                if result.get("is_safe") is False:
+                    logger.warning("Pergunta rejeitada pelos guardrails")
+                    print(f"⚠️  Assistente: {result.get('generation', 'Pergunta fora do escopo médico.')}\n")
+                else:
+                    logger.info("✅ Resposta gerada com sucesso")
+                    print(f"🤖 Assistente: {result.get('generation', 'Desculpe, não consegui processar a pergunta.')}\n")
+                
+                # Mostrar fontes (se disponível)
+                if result.get("documents"):
+                    print("📚 Protocolos consultados:")
+                    for doc in result["documents"][:3]:
+                        source = doc.metadata.get("source", "Desconhecido")
+                        print(f"   • {source}")
+                    print()
+                
+            except KeyboardInterrupt:
+                print("\n\n👋 Interrupção do usuário. Encerrando...\n")
+                logger.info("🛑 Interrupção por Ctrl+C")
+                break
+            except Exception as e:
+                logger.error(f"❌ Erro ao processar pergunta: {e}", exc_info=True)
+                print(f"❌ Erro técnico: {e}\n")
+    
     except Exception as e:
-        print(f"❌ Erro fatal ao iniciar o sistema: {e}")
+        logger.critical(f"❌ Erro crítico ao inicializar: {e}", exc_info=True)
+        print(f"\n❌ ERRO CRÍTICO: {e}")
+        print("Verifique os logs em logs/machado-oraculo-errors.log para mais detalhes.\n")
         sys.exit(1)
 
-    # Configuração da Sessão
-    # O thread_id é usado pelo LangGraph para persistir estado se usarmos checkpointer (futuro)
-    thread_id = str(uuid.uuid4())
-    print(f"🆔 ID da Sessão: {thread_id}")
-    print("💡 Digite 'sair' para encerrar ou 'limpar' para reiniciar o histórico.\n")
-
-    # Histórico local de conversa (para manter o contexto durante a execução)
-    chat_history = []
-
-    # 3. Loop de Interação (Chat)
-    while True:
-        try:
-            user_input = input("👨‍⚕️  Você (Médico): ").strip()
-            
-            if not user_input:
-                continue
-            
-            if user_input.lower() in ["sair", "exit", "quit"]:
-                print("👋 Encerrando plantão. Até logo!")
-                break
-            
-            if user_input.lower() == "limpar":
-                chat_history = []
-                print("🧹 Histórico limpo.")
-                continue
-
-            # Prepara o estado inicial para o Grafo
-            initial_state = {
-                "medical_question": user_input,
-                "chat_history": chat_history,
-                "is_safe": True,     # Assume seguro até o Guardrail verificar
-                "loop_count": 0      # Contador para evitar loops infinitos (se houver re-escrita)
-            }
-
-            print("🤖 Processando...", end="\r")
-
-            # Executa o Grafo!
-            # O stream_mode="values" retorna o estado final após todos os passos
-            result = app_graph.invoke(initial_state)
-
-            # Extrai a resposta final
-            generation = result.get("generation")
-            
-            # Atualiza histórico com a nova interação
-            chat_history.append(("user", user_input))
-            chat_history.append(("assistant", generation))
-
-            # Exibe a resposta formatada
-            print(f"\n💊 Assistente: {generation}\n")
-            print("-" * 60)
-
-        except KeyboardInterrupt:
-            print("\n\n👋 Interrupção detectada. Encerrando...")
-            break
-        except Exception as e:
-            logger.error(f"Erro durante o processamento: {e}")
-            print(f"\n❌ Ocorreu um erro ao processar sua solicitação: {e}")
 
 if __name__ == "__main__":
     main()

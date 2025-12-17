@@ -3,24 +3,44 @@ Módulo: src/infrastructure/vector_store.py
 Descrição: Gerencia ingestão de XML (MedQuAD), JSON (PubMedQA) e PDF.
 """
 
-import os
-import shutil
 import json
+import logging
+import os
 import xml.etree.ElementTree as ET
 from typing import List
 
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.config import settings
-from src.infrastructure.llm_factory import LLMFactory
+
+logger = logging.getLogger(__name__)
 
 class VectorStoreRepository:
+    """Gerencia operações com vector store (Chroma)."""
+    
     def __init__(self):
-        self.embeddings = LLMFactory.get_embeddings()
-        self.vectorstore = self._initialize_db()
+        self.docs_path = settings.docs_full_path
+        self.db_path = settings.vector_db_full_path
+        self.embeddings = self._get_embeddings()
+        self.vector_store = self._initialize_vectorstore()
+
+    def _get_embeddings(self):
+        """Inicializa embeddings do Google Generative AI."""
+        logger.info("🔄 Inicializando embeddings...")
+        try:
+            embeddings = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                google_api_key=settings.gemini_api_key # type: ignore
+            )
+            logger.info("✅ Embeddings inicializados")
+            return embeddings
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar embeddings: {e}")
+            raise
 
     def _load_medquad_xml(self, file_path: str) -> List[Document]:
         """
@@ -48,7 +68,7 @@ class VectorStoreRepository:
                 answer = answer_elem.text if answer_elem is not None else ""
                 
                 # AJUSTE: Se não tiver resposta, criamos um aviso indicando a fonte
-                if not answer.strip():
+                if not answer.strip(): # type: ignore
                     answer = f"Conteúdo protegido por copyright. Consulte a fonte oficial: {url}"
                 
                 # Monta o conteúdo para o RAG
@@ -145,34 +165,59 @@ class VectorStoreRepository:
         print(f"📄 Total de documentos carregados: {len(all_docs)}")
         return all_docs
 
-    def _initialize_db(self):
-        # Se banco existe, carrega
-        if os.path.exists(settings.vector_db_path) and os.listdir(settings.vector_db_path):
-            print("💾 Carregando banco vetorial existente...")
-            return Chroma(
-                persist_directory=settings.vector_db_path, 
-                embedding_function=self.embeddings
-            )
-        
-        # Se não, cria
-        print("⚙️ Criando novo índice...")
-        raw_docs = self._load_documents()
-        
-        if not raw_docs:
-            print("⚠️ AVISO: Nenhum documento encontrado. O assistente não terá conhecimento.")
-            return Chroma(embedding_function=self.embeddings, persist_directory=settings.vector_db_path)
-
-        splitter = RecursiveCharacterTextSplitter(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
-        chunks = splitter.split_documents(raw_docs)
-        
-        vectorstore = Chroma.from_documents(documents=chunks, embedding=self.embeddings, persist_directory=settings.vector_db_path)
-        print("✅ Banco Vetorial Pronto!")
-        return vectorstore
-
-    def get_retriever(self, k: int = 4):
-        return self.vectorstore.as_retriever(search_kwargs={"k": k})
+    def _chunk_documents(self, documents):
+        """Divide documentos em chunks."""
+        logger.info("✂️ Dividindo documentos em chunks...")
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+            separators=["\n\n", "\n", ".", " ", ""]
+        )
+        chunks = splitter.split_documents(documents)
+        logger.info(f"✅ {len(chunks)} chunks criados")
+        return chunks
     
-    def reset_database(self):
-        if os.path.exists(settings.vector_db_path):
-            shutil.rmtree(settings.vector_db_path)
-        self.vectorstore = self._initialize_db()
+    def _initialize_vectorstore(self):
+        """Inicializa ou carrega vector store existente."""
+        logger.info(f"💾 Inicializando Chroma em {self.db_path}...")
+        try:
+            if (self.db_path / "chroma.sqlite3").exists():
+                logger.info("📦 Carregando banco vetorial existente...")
+                vector_store = Chroma(
+                    embedding_function=self.embeddings,
+                    persist_directory=str(self.db_path),
+                    collection_name="medical_protocols"
+                )
+                logger.info("✅ Vectorstore carregado")
+            else:
+                logger.info("🆕 Criando novo banco vetorial...")
+                documents = self._load_documents()
+                chunks = self._chunk_documents(documents)
+                
+                vector_store = Chroma.from_documents(
+                    documents=chunks,
+                    embedding=self.embeddings,
+                    persist_directory=str(self.db_path),
+                    collection_name="medical_protocols"
+                )
+                logger.info("✅ Vectorstore criado")
+            
+            return vector_store
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar vectorstore: {e}")
+            raise
+
+    def get_retriever(self):
+        """Retorna retriever configurado."""
+        return self.vector_store.as_retriever(
+            search_kwargs={"k": 4}
+        )
+    
+    def reset_vectorstore(self):
+        """Reseta vector store completamente."""
+        logger.warning("🔄 Resetando vectorstore...")
+        import shutil
+        if self.db_path.exists():
+            shutil.rmtree(self.db_path)
+        self.vector_store = self._initialize_vectorstore()
+        logger.info("✅ Vectorstore resetado")

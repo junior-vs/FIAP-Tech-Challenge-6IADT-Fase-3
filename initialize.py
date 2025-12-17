@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
 Script para inicializar o sistema de assistência médica.
-Configura o vectorstore com protocolos médicos internos.
-Execute isto uma vez antes de usar o assistente.
+Configura Chroma com protocolos médicos internos.
 """
 
 import sys
 from pathlib import Path
 
-# Adicionar root do projeto ao path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
@@ -17,54 +15,46 @@ from src.infrastructure.vector_store import VectorStoreRepository
 from src.infrastructure.llm_factory import LLMFactory
 
 
-def initialize():
-    """Inicializa o vectorstore e testa conexão com o LLM."""
+def main():
     print("🔧 Inicializando Sistema de Assistência Médica...\n")
     
-    # 1. Valida configurações
-    print("✅ Verificando configurações...")
-    if not settings.gemini_api_key:
-        print("❌ ERRO: GEMINI_API_KEY não configurada no .env")
-        return False
-    print("✅ GEMINI_API_KEY encontrada")
-    
-    # 2. Testa conexão com LLM
-    print("\n🤖 Testando conexão com Google Gemini...")
     try:
-        _ = LLMFactory.get_llm()
-        print("✅ Conexão com Google Gemini estabelecida")
+        # Validar configurações
+        print("✅ Verificando configurações...")
+        if not settings.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY não configurada")
+        print("✅ GEMINI_API_KEY encontrada\n")
+        
+        # Testar LLM
+        print("🤖 Testando conexão com Google Gemini...")
+        llm = LLMFactory.get_llm()
+        test_response = llm.invoke("Teste de conexão")
+        print("✅ Conexão com Google Gemini estabelecida\n")
+        
+        # Inicializar vectorstore
+        print("📚 Inicializando Vectorstore...")
+        vector_repo = VectorStoreRepository()
+        retriever = vector_repo.get_retriever()
+        print("✅ Vectorstore inicializado com sucesso\n")
+        
+        # Teste de retrieval
+        print("🔍 Testando busca vetorial...")
+        test_docs = retriever.invoke("sepse em idosos")
+        print(f"✅ Teste OK: {len(test_docs)} documentos encontrados\n")
+        
+        print("=" * 60)
+        print("✅ INICIALIZAÇÃO CONCLUÍDA COM SUCESSO!")
+        print("=" * 60)
+        print("\nPróxima etapa:")
+        print("  .venv/bin/python src/main.py")
+        print("\n")
+        
     except Exception as e:
-        print(f"❌ ERRO ao conectar com Google Gemini: {e}")
-        return False
-    
-    # 3. Inicializa vectorstore
-    print("\n📚 Inicializando Vectorstore...")
-    try:
-        vs_repo = VectorStoreRepository()
-        print("✅ Vectorstore inicializado com sucesso")
-        print(f"   📂 Armazenado em: {settings.faiss_index_path}")
-    except Exception as e:
-        print(f"❌ ERRO ao inicializar vectorstore: {e}")
-        return False
-    
-    # 4. Testa retriever
-    print("\n🔍 Testando retriever...")
-    try:
-        _ = vs_repo.get_retriever()
-        print("✅ Retriever funcional")
-    except Exception as e:
-        print(f"❌ ERRO ao testar retriever: {e}")
-        return False
-    
-    print("\n" + "="*60)
-    print("✅ SISTEMA PRONTO!")
-    print("="*60)
-    print("\nAgora você pode executar:")
-    print("  python -m src.main")
-    print("\n")
-    return True
+        print(f"\n❌ ERRO durante inicialização: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    success = initialize()
-    sys.exit(0 if success else 1)
+    main()

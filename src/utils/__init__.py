@@ -1,5 +1,5 @@
-"""Utilitários do projeto."""
+"""Utilitários da aplicação médica."""
 
-from src.utils.logging import LoggingManager, get_logger
+from src.utils.logging import setup_logging, get_logger
 
-__all__ = ["LoggingManager", "get_logger"]
+__all__ = ["setup_logging", "get_logger"]
