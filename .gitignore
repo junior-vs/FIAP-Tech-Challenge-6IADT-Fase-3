@@ -1,3 +1,4 @@
+data/*
 # Environment
 .env
 .env.local

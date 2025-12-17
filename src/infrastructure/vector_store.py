@@ -1,10 +1,6 @@
 """
 Módulo: src/infrastructure/vector_store.py
-Descrição: Gerencia a ingestão de múltiplos formatos de documentos médicos.
-Suporta:
-1. XML (Padrão MedQuAD)
-2. JSON (Padrão PubMedQA)
-3. PDFs (Documentos Gerais)
+Descrição: Gerencia ingestão de XML (MedQuAD), JSON (PubMedQA) e PDF.
 """
 
 import os
@@ -13,8 +9,7 @@ import json
 import xml.etree.ElementTree as ET
 from typing import List
 
-# Importações do LangChain
-from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -29,19 +24,20 @@ class VectorStoreRepository:
 
     def _load_medquad_xml(self, file_path: str) -> List[Document]:
         """
-        Parser customizado para arquivos XML do MedQuAD.
-        Extrai pares de <Question> e <Answer> mantendo o contexto do <Focus>.
+        Parser para XML do MedQuAD. Lida com casos de respostas vazias (MedlinePlus).
         """
         docs = []
         try:
             tree = ET.parse(file_path)
             root = tree.getroot()
             
-            # O "Foco" do documento (ex: nome do medicamento ou doença)
+            # Tenta pegar metadados globais do arquivo
             focus_elem = root.find('Focus')
             focus = focus_elem.text if focus_elem is not None else "General Health"
             
-            # Itera sobre cada par de pergunta/resposta
+            # Pega a URL original se disponível (útil quando não há resposta no XML)
+            url = root.get('url', 'URL não informada')
+            
             qa_pairs = root.findall('.//QAPair')
             
             for pair in qa_pairs:
@@ -51,15 +47,16 @@ class VectorStoreRepository:
                 question = question_elem.text if question_elem is not None else ""
                 answer = answer_elem.text if answer_elem is not None else ""
                 
-                # Tratamento para casos onde a resposta pode estar vazia (comuns em alguns datasets públicos)
+                # AJUSTE: Se não tiver resposta, criamos um aviso indicando a fonte
                 if not answer.strip():
-                    continue  # Pula registros sem resposta útil
+                    answer = f"Conteúdo protegido por copyright. Consulte a fonte oficial: {url}"
                 
-                # Monta o conteúdo que será indexado
+                # Monta o conteúdo para o RAG
                 page_content = (
                     f"Topic: {focus}\n"
                     f"Question: {question}\n"
-                    f"Answer: {answer}"
+                    f"Answer: {answer}\n"
+                    f"Source URL: {url}"
                 )
                 
                 metadata = {
@@ -72,20 +69,20 @@ class VectorStoreRepository:
                 docs.append(Document(page_content=page_content, metadata=metadata))
                 
         except Exception as e:
-            print(f"⚠️ Erro ao processar XML MedQuAD {os.path.basename(file_path)}: {e}")
+            print(f"⚠️ Erro no XML {os.path.basename(file_path)}: {e}")
             
         return docs
 
     def _load_pubmed_json(self, file_path: str) -> List[Document]:
         """
-        Carregador para o formato PubMedQA (ori_pqal.json).
+        Carregador para PubMedQA (JSON).
         """
         docs = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            print(f"   🔍 Processando dataset PubMedQA ({len(data)} registros)...")
+            print(f"   PubMedQA: processando {len(data)} registros de {os.path.basename(file_path)}...")
             
             for pubmed_id, content in data.items():
                 question = content.get("QUESTION", "")
@@ -105,97 +102,76 @@ class VectorStoreRepository:
                     "pubmed_id": pubmed_id,
                     "type": "pubmed_qa"
                 }
-                
                 docs.append(Document(page_content=page_content, metadata=metadata))
-                
         except Exception as e:
-            print(f"❌ Erro ao ler JSON {file_path}: {e}")
-            
+            print(f"❌ Erro JSON {file_path}: {e}")
         return docs
 
     def _load_documents(self):
         """
-        Estratégia híbrida de carregamento:
-        - Varre a pasta recursivamente.
-        - Identifica a extensão.
-        - Aplica o loader específico (XML customizado, JSON customizado ou PDF padrão).
+        Varre recursivamente a pasta configurada (os.walk) para encontrar arquivos.
         """
         if not os.path.exists(settings.docs_path):
+            # Tenta criar, mas avisa se estiver vazio
             os.makedirs(settings.docs_path, exist_ok=True)
-            print(f"⚠️ Pasta {settings.docs_path} criada.")
+            print(f"⚠️ Pasta {settings.docs_path} criada e vazia.")
             return []
 
-        print(f"📂 Iniciando ingestão na pasta: {settings.docs_path}")
+        print(f"📂 Varrendo base de conhecimento em: {settings.docs_path}")
         all_docs = []
 
-        # Varredura manual para ter controle total sobre cada extensão
+        # os.walk garante que entramos em subpastas (7_SeniorHealth_QA, ori_pqal, etc)
         for root, dirs, files in os.walk(settings.docs_path):
             for file in files:
                 file_path = os.path.join(root, file)
                 
-                # 1. Processar XMLs (MedQuAD)
+                # 1. XMLs
                 if file.endswith(".xml"):
-                    xml_docs = self._load_medquad_xml(file_path)
-                    all_docs.extend(xml_docs)
+                    all_docs.extend(self._load_medquad_xml(file_path))
                 
-                # 2. Processar JSONs (PubMedQA)
+                # 2. JSONs (apenas os de dados, ignorando configs)
                 elif file.endswith(".json"):
-                    # Verifica se é o arquivo de perguntas (evita ler arquivos de config)
                     if "pqal" in file or "ground_truth" in file:
-                         json_docs = self._load_pubmed_json(file_path)
-                         all_docs.extend(json_docs)
+                         all_docs.extend(self._load_pubmed_json(file_path))
                 
-                # 3. Processar PDFs (Protocolos)
+                # 3. PDFs
                 elif file.endswith(".pdf"):
                     try:
                         loader = PyPDFLoader(file_path)
                         all_docs.extend(loader.load())
-                    except Exception as e:
-                        print(f"Erro no PDF {file}: {e}")
+                    except Exception:
+                        pass # Ignora erros de PDF corrompido
 
-        print(f"📄 Ingestão concluída. Total de documentos fragmentados: {len(all_docs)}")
+        print(f"📄 Total de documentos carregados: {len(all_docs)}")
         return all_docs
 
     def _initialize_db(self):
-        """
-        Inicializa ou carrega o ChromaDB.
-        """
-        # Se o banco existe e tem arquivos, carrega direto (mais rápido)
+        # Se banco existe, carrega
         if os.path.exists(settings.vector_db_path) and os.listdir(settings.vector_db_path):
-            print("💾 Banco vetorial encontrado. Carregando da memória...")
+            print("💾 Carregando banco vetorial existente...")
             return Chroma(
                 persist_directory=settings.vector_db_path, 
                 embedding_function=self.embeddings
             )
         
-        print("⚙️ Criando novo índice vetorial unificado (PDF + XML + JSON)...")
-        
+        # Se não, cria
+        print("⚙️ Criando novo índice...")
         raw_docs = self._load_documents()
-        if not raw_docs:
-            print("⚠️ Nenhum documento válido encontrado. Verifique a pasta docs/knowledge_base.")
-            return Chroma(
-                embedding_function=self.embeddings,
-                persist_directory=settings.vector_db_path
-            )
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.chunk_size, 
-            chunk_overlap=settings.chunk_overlap
-        )
-        chunks = splitter.split_documents(raw_docs)
-        print(f"🧩 Vetorizando {len(chunks)} fragmentos de informação...")
         
-        vectorstore = Chroma.from_documents(
-            documents=chunks,
-            embedding=self.embeddings,
-            persist_directory=settings.vector_db_path
-        )
-        print("✅ Banco de Conhecimento Médico pronto!")
+        if not raw_docs:
+            print("⚠️ AVISO: Nenhum documento encontrado. O assistente não terá conhecimento.")
+            return Chroma(embedding_function=self.embeddings, persist_directory=settings.vector_db_path)
+
+        splitter = RecursiveCharacterTextSplitter(chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
+        chunks = splitter.split_documents(raw_docs)
+        
+        vectorstore = Chroma.from_documents(documents=chunks, embedding=self.embeddings, persist_directory=settings.vector_db_path)
+        print("✅ Banco Vetorial Pronto!")
         return vectorstore
 
     def get_retriever(self, k: int = 4):
         return self.vectorstore.as_retriever(search_kwargs={"k": k})
-
+    
     def reset_database(self):
         if os.path.exists(settings.vector_db_path):
             shutil.rmtree(settings.vector_db_path)
