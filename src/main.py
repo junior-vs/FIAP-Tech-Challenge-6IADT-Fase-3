@@ -7,6 +7,8 @@ e exibição de alertas de segurança/alucinação.
 
 import sys
 import uuid
+from typing import cast
+from src.domain.state import AgentState
 from src.use_cases.graph import GraphBuilder
 from src.utils.logging import get_logger
 
