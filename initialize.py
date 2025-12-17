@@ -12,7 +12,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from src.config import settings
-from src.infrastructure.config import VectorStoreRepository
+from src.infrastructure.vector_store import VectorStoreRepository
 from src.infrastructure.llm_factory import LLMFactory
 
 
