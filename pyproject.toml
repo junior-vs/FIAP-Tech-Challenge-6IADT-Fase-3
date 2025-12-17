@@ -24,4 +24,5 @@ dependencies = [
     "pytest>=7.4.0",          # Testes unitários
     "pytest-cov>=4.1.0",      # Cobertura de testes
     "pytest-mock>=3.11.0",    # Mocks para testes
+    "langdetect>=1.0.9",
 ]

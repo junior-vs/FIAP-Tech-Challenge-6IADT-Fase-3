@@ -4,28 +4,27 @@ Descrição: Define a estrutura de dados (Estado) que trafega pelo grafo de deci
 Motivo da alteração: Correção de tipagem (documents) e inclusão de campos faltantes (chat_history).
 """
 
-from typing import List, Any, Optional, Annotated
-import operator
-from typing_extensions import TypedDict
+from typing import TypedDict, List, Optional
+from langchain_core.documents import Document
 
 class AgentState(TypedDict):
     """
-    O estado do agente rastreia o fluxo da conversa médica e a tomada de decisão.
+    Estado central da aplicação que flui através do grafo RAG.
+    
+    WHEN [pergunta médica é submetida]
+    THE SYSTEM SHALL [manter estado consistente através de todos os nós]
     """
-    medical_question: str
     
-    # Contexto do paciente (se houver)
-    context_data: Optional[str]
+    # Input
+    medical_question: str  # Pergunta do usuário (idioma original)
+    language: str  # Idioma detectado: "pt" ou "en"
     
-    # Documentos recuperados são objetos do LangChain, não apenas strings
-    documents: List[Any] 
+    # Processing
+    medical_question_en: str  # Pergunta traduzida para inglês (para busca)
+    is_safe: bool  # Passou na validação de guardrails
+    documents: List[Document]  # Documentos recuperados
     
-    generation: str
-    
-    # Flags de Segurança e Controle
-    is_safe: bool
-    risk_level: str
-    
-    # CRÍTICO: Adicionado para manter o histórico e controle de loops
-    chat_history: List[Any]
-    loop_count: int
+    # Output
+    generation: str  # Resposta em inglês (antes de tradução final)
+    generation_final: str  # Resposta final no idioma original
+    hallucination_check: str  # Resultado da validação

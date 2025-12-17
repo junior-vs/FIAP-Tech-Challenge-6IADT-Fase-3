@@ -1,12 +1,13 @@
 """
 Guardrails de validação para segurança e conformidade médica.
-Responsável por validar entrada de usuários antes do processamento.
+Usa LLM para análise semântica real da pergunta (não keywords).
 """
 
 import logging
-import re
 from typing import Optional
 from pydantic import BaseModel, Field
+import re
+from src.infrastructure.llm_factory import LLMFactory
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +23,13 @@ class GuardrailsValidationResult(BaseModel):
 
 class GuardrailsValidator:
     """
-    Valida perguntas médicas para segurança, conformidade e pertinência clínica.
+    Valida perguntas médicas usando análise semântica com LLM.
     
     WHEN [usuário submete pergunta médica] 
-    THE SYSTEM SHALL [validar entrada contra PII, relevância médica, e conformidade]
+    THE SYSTEM SHALL [validar entrada contra PII e relevância médica real]
     """
     
-    # Padrões PII (Informações Pessoalmente Identificáveis)
+    # Padrões PII - mantidos simples e eficientes
     PII_PATTERNS = {
         "cpf": r"\d{3}\.\d{3}\.\d{3}-\d{2}",
         "cnpj": r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}",
@@ -37,37 +38,19 @@ class GuardrailsValidator:
         "patient_name": r"(?i)(paciente|patient|Sr\.|Dra?\.|Mrs?\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*",
     }
     
-    # Termos médicos mínimos para relevância
-    MEDICAL_KEYWORDS = {
-        "diagnóstico", "diagnóstico", "sintoma", "tratamento", "protocolo",
-        "medicamento", "droga", "terapia", "paciente", "saúde", "doença",
-        "infecção", "inflamação", "alergia", "cirurgia", "hospital",
-        "médico", "clínico", "clínica", "pressão", "diabetes", "hipertensão",
-        "sepse", "pneumonia", "insuficiência", "cardíaco", "renal", "hepático",
-        "antibiótico", "vacinação", "vacina", "febre", "dor", "fadiga",
-        "dispneia", "tosse", "náusea", "vômito", "diarreia", "anemia",
-        "angiografia", "radiografia", "ressonância", "ultrassom", "tomografia",
-        "análise", "exame", "laboratorio", "teste", "cultura", "hemograma",
-        "idoso", "geriátrico", "criança", "neonato", "gestante", "pós-operatório"
-    }
-    
-    # Tópicos explicitamente não-médicos
-    NON_MEDICAL_TOPICS = {
-        "receita", "brigadeiro", "bolo", "livro", "romance", "filme",
-        "política", "economia", "futebol", "música", "história",
-        "matemática", "física", "programação", "código", "javascript"
-    }
-    
     def __init__(self):
         self.max_question_length = 500
         self.min_question_length = 5
+        self.llm = LLMFactory.get_llm()
+        # Cache simples para evitar chamar LLM repetidas vezes
+        self._cache = {}
     
     def validate(self, question: str) -> bool:
         """
         Valida pergunta do usuário contra múltiplos critérios de segurança.
         
         WHEN [pergunta é submetida]
-        THE SYSTEM SHALL [retornar True se válida, False caso contrário]
+        THE SYSTEM SHALL [validar usando análise LLM de relevância médica]
         
         Args:
             question: Texto da pergunta do usuário
@@ -80,10 +63,10 @@ class GuardrailsValidator:
         result = self._run_validations(question)
         
         if not result.is_valid:
-            logger.warning(f"Validação rejeitada: {result.reason}")
+            logger.warning(f"❌ Validação rejeitada: {result.reason}")
             return False
         
-        logger.info("✅ Pergunta passou em todas as validações")
+        logger.info(f"✅ Pergunta passou em todas as validações")
         return True
     
     def _run_validations(self, question: str) -> GuardrailsValidationResult:
@@ -96,7 +79,7 @@ class GuardrailsValidator:
                 reason=f"Pergunta deve ter entre {self.min_question_length} e {self.max_question_length} caracteres"
             )
         
-        # Validação 2: PII Detection
+        # Validação 2: PII Detection (rápido, regex)
         pii_found = self._detect_pii(question)
         if pii_found:
             return GuardrailsValidationResult(
@@ -105,11 +88,12 @@ class GuardrailsValidator:
                 has_pii=True
             )
         
-        # Validação 3: Relevância Médica
-        if not self._is_medically_relevant(question):
+        # Validação 3: Relevância Médica (usando LLM)
+        is_relevant = self._is_medically_relevant(question)
+        if not is_relevant:
             return GuardrailsValidationResult(
                 is_valid=False,
-                reason="Pergunta não é relevante ao contexto médico. Formule uma pergunta sobre saúde ou protocolos clínicos.",
+                reason="Pergunta não é sobre medicina ou saúde. Por favor, faça uma pergunta sobre saúde, doenças, tratamentos ou protocolos médicos.",
                 is_medical_relevant=False
             )
         
@@ -122,7 +106,12 @@ class GuardrailsValidator:
         THE SYSTEM SHALL [rejeitar se menor que min ou maior que max]
         """
         length = len(question.strip())
-        return self.min_question_length <= length <= self.max_question_length
+        result = self.min_question_length <= length <= self.max_question_length
+        
+        if not result:
+            logger.warning(f"⚠️ Comprimento inválido: {length} caracteres (esperado: {self.min_question_length}-{self.max_question_length})")
+        
+        return result
     
     def _detect_pii(self, text: str) -> Optional[str]:
         """
@@ -136,7 +125,7 @@ class GuardrailsValidator:
         
         for pii_type, pattern in self.PII_PATTERNS.items():
             if re.search(pattern, text):
-                logger.warning(f"PII detectado: {pii_type}")
+                logger.warning(f"🔐 PII detectado: {pii_type}")
                 return pii_type
         
         return None
@@ -144,39 +133,63 @@ class GuardrailsValidator:
     def _is_medically_relevant(self, question: str) -> bool:
         """
         WHEN [pergunta é recebida]
-        THE SYSTEM SHALL [verificar se contém termos médicos relevantes]
+        THE SYSTEM SHALL [usar LLM para analisar se é pergunta médica]
         
-        Estratégia: Buscar por palavras-chave médicas ou rejeitar tópicos não-médicos óbvios.
+        ✅ NOVO: Análise semântica com LLM, não keywords
+        
+        Args:
+            question: Pergunta a validar
+            
+        Returns:
+            bool: True se é pergunta médica, False caso contrário
         """
-        question_lower = question.lower()
+        # Verificar cache primeiro (para evitar múltiplas chamadas ao LLM)
+        cache_key = hash(question)
+        if cache_key in self._cache:
+            logger.debug(f"✅ Usando resposta em cache")
+            return self._cache[cache_key]
         
-        # Rejeição explícita: tópicos claramente não-médicos
-        for topic in self.NON_MEDICAL_TOPICS:
-            if topic in question_lower:
-                logger.debug(f"Tópico não-médico detectado: {topic}")
-                return False
+        try:
+            logger.debug(f"🤖 Analisando pergunta com LLM...")
+            
+            # Prompt simples e claro para o LLM
+            # Instruir para responder APENAS com "sim" ou "não"
+            prompt = f"""Analise a seguinte pergunta e responda APENAS com "sim" ou "não".
+
+A pergunta é sobre medicina, saúde, doenças, tratamentos, protocolos médicos, 
+diagnósticos, sintomas, medicamentos, cirurgias, ou tópicos clínicos similares?
+
+Pergunta: "{question}"
+
+Responda APENAS com "sim" ou "não":"""
+            
+            response = self.llm.invoke(prompt)
+            response_text = response.content if hasattr(response, 'content') else str(response)
+            response_text = response_text.strip().lower()
+            
+            logger.debug(f"🤖 Resposta do LLM: {response_text}")
+            
+            # Analisar resposta
+            is_medical = "sim" in response_text or "yes" in response_text
+            
+            # Cachear resultado
+            self._cache[cache_key] = is_medical
+            
+            if is_medical:
+                logger.debug(f"✅ Pergunta reconhecida como médica")
+            else:
+                logger.debug(f"❌ Pergunta NÃO reconhecida como médica")
+            
+            return is_medical
         
-        # Aceição: contém palavras-chave médicas
-        for keyword in self.MEDICAL_KEYWORDS:
-            if keyword in question_lower:
-                logger.debug(f"Palavra-chave médica encontrada: {keyword}")
-                return True
-        
-        # Heurística: Se tem muitos números ou menciona "protocolo/tratamento/sintoma"
-        if any(word in question_lower for word in ["protocolo", "tratamento", "sintoma", "medicação"]):
+        except Exception as e:
+            logger.error(f"❌ Erro ao analisar com LLM: {e}")
+            # Em caso de erro, ser permissivo (assumir que é relevante)
+            # Melhor deixar passar do que rejeitar com erro
+            logger.warning(f"⚠️ Erro na análise LLM - assumindo pergunta válida por segurança")
             return True
-        
-        # Se nada foi encontrado, rejeitar por segurança
-        logger.debug("Nenhuma palavra-chave médica detectada")
-        return False
     
-    def get_validation_result_message(self, result: GuardrailsValidationResult) -> str:
-        """Gera mensagem amigável baseada no resultado de validação."""
-        if result.is_valid:
-            return "✅ Pergunta validada com sucesso"
-        elif result.has_pii:
-            return f"⚠️ {result.reason}"
-        elif not result.is_medical_relevant:
-            return f"⚠️ {result.reason}"
-        else:
-            return f"❌ {result.reason}"
+    def clear_cache(self):
+        """Limpa cache de análises."""
+        self._cache.clear()
+        logger.debug("🗑️ Cache de validação limpo")
