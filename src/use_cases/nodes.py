@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from src.domain.state import GraphState
+from src.domain.state import AgentState
 from src.domain.guardrails_check import HallucinationGrade, InputGuardrail, RetrievalGrader
 from src.infrastructure.llm_factory import LLMFactory
 from src.utils.logging import get_logger
@@ -130,7 +130,7 @@ class RAGNodes:
         ])
         return prompt | llm_structured
 
-    def validate_generation(self, state: GraphState):
+    def validate_generation(self, state: AgentState):
         logger.debug("🔍 Verificando alucinações (Output Guardrail)...")
         question = state["question"]
         documents = state["documents"]
@@ -157,13 +157,13 @@ class RAGNodes:
             logger.error(f"Erro na validação de alucinação: {e}")
             return {"generation": generation, "hallucination": False}
   
-    def retrieve(self, state: GraphState):
+    def retrieve(self, state: AgentState):
         logger.debug(f"Buscando documentos para: {state['question'][:500]}...")
         documents = self.retriever.invoke(state["question"])
         logger.info(f"Recuperados {len(documents)} documentos")
         return {"documents": documents, "question": state["question"]}
 
-    def grade_documents(self, state: GraphState):
+    def grade_documents(self, state: AgentState):
         logger.debug("Avaliando relevância dos documentos...")
         question = state["question"]
         documents = state["documents"]
@@ -187,7 +187,7 @@ class RAGNodes:
         logger.info(f"Documentos relevantes: {len(relevant_docs)}/{len(documents)}")
         return {"documents": relevant_docs, "question": question}
 
-    def generate(self, state: GraphState):
+    def generate(self, state: AgentState):
         logger.debug("Gerando resposta...")
         context_text = "\n\n".join([d.page_content for d in state["documents"]])
 
@@ -213,7 +213,7 @@ class RAGNodes:
             "chat_history": updated_history
         }
 
-    def transform_query(self, state: GraphState) -> dict:
+    def transform_query(self, state: AgentState) -> dict:
         """
         Reformula a query usando o LLM.
         Incrementa loop_count para rastrear tentativas.
@@ -249,7 +249,7 @@ class RAGNodes:
             "loop_count": current_loop + 1
         }
 
-    def guardrails_check(self, state: GraphState):
+    def guardrails_check(self, state: AgentState):
         logger.debug("🛡️ Verificando Guardrails da pergunta...")
         question = state["question"]
         

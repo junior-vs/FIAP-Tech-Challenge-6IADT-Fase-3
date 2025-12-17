@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, END
-from src.domain.state import GraphState
+from src.domain.state import AgentState
 from src.use_cases.nodes import RAGNodes
 from langgraph.checkpoint.memory import MemorySaver
 from src.utils.logging import logger
@@ -9,7 +9,7 @@ class RAGGraphBuilder:
         self.nodes = RAGNodes(retriever)
         self.max_loops = max_loops
 
-    def _check_loop_limit(self, state: GraphState) -> bool:
+    def _check_loop_limit(self, state: AgentState) -> bool:
         """
         Verifica se ainda há tentativas disponíveis.
         
@@ -31,7 +31,7 @@ class RAGGraphBuilder:
             return False
         return True
 
-    def _check_hallucination(self, state: GraphState):
+    def _check_hallucination(self, state: AgentState):
         """
         Decide se vai tentar corrigir alucinação ou finalizar.
         Garante que nunca exceda o limite de loops.
@@ -53,7 +53,7 @@ class RAGGraphBuilder:
             logger.warning("🛑 Hallucination detected but loop limit reached - returning degraded response")
             return "end"
 
-    def _check_guardrail_result(self, state: GraphState):
+    def _check_guardrail_result(self, state: AgentState):
         """Verifica se guardrail rejeitou a entrada."""
         if state.get("generation"):
             # Guardrail rejeitou, geração tem mensagem de erro
@@ -62,7 +62,7 @@ class RAGGraphBuilder:
             return "end"
         return "retrieve"
 
-    def _decide_next_step(self, state: GraphState):
+    def _decide_next_step(self, state: AgentState):
         """
         Decide entre reformular query ou gerar resposta.
         Verifica limite de loops antes de reformular.
@@ -79,7 +79,7 @@ class RAGGraphBuilder:
         
         return "generate"
 
-    def _store_original_question(self, state: GraphState):
+    def _store_original_question(self, state: AgentState):
         """Armazena a pergunta original e inicializa contadores."""
         updates = {}
         
@@ -95,7 +95,7 @@ class RAGGraphBuilder:
         return updates if updates else {}
 
     def build(self):
-        workflow = StateGraph(GraphState)
+        workflow = StateGraph(AgentState)
 
         # Adiciona nós
         workflow.add_node("store_question", self._store_original_question)

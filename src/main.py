@@ -7,7 +7,7 @@ import uuid
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.infrastructure.vector_store import VectorStoreRepository
+from src.infrastructure.config import VectorStoreRepository
 from src.use_cases.graph import RAGGraphBuilder
 from src.utils.logging import LoggingManager, get_logger  # ← ADICIONE ESTA LINHA
 
