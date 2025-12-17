@@ -11,9 +11,10 @@ Exemplo:
 """
 
 import json
-from sklearn.metrics import accuracy_score, f1_score
 import sys
 from pathlib import Path
+
+from sklearn.metrics import accuracy_score, f1_score
 
 pred_path = sys.argv[1]
 
@@ -31,7 +32,7 @@ if not pred_file.exists():
 ground_truth = json.load(open(ground_truth_file)) 
 predictions = json.load(open(pred_file))
 
-assert set(list(ground_truth)) == set(list(predictions)), 'Please predict all and only the instances in the test set.'
+assert set(ground_truth) == set(predictions), 'Please predict all and only the instances in the test set.'
 
 pmids = list(ground_truth)
 truth = [ground_truth[pmid] for pmid in pmids]

@@ -1,5 +1,3 @@
-__author__ = 'Qiao Jin'
-
 """
 Script legado: Calcula performance humana no test set.
 Ajustado para novo caminho: docs/data/knowledge_base/
@@ -22,8 +20,12 @@ from pathlib import Path
 
 from sklearn.metrics import accuracy_score, f1_score
 
-# Definir caminho correto (agora o script está na pasta de dados)
-data_path = Path("ori_pqal")
+# Constantes para formatação das métricas
+ACCURACY_FORMAT = 'Accuracy %f'
+MACRO_F1_FORMAT = 'Macro-F1 %f'
+
+# Definir caminho correto
+data_path = Path("docs/data/knowledge_base/ori_pqal")
 test_set_file = data_path / "test_set.json"
 
 if not test_set_file.exists():
@@ -43,12 +45,13 @@ for pmid, info in test_set.items():
 maj = ['yes' for _ in labels]
 
 print('====Majority Performance====')
-
+print(ACCURACY_FORMAT % accuracy_score(labels, maj))
+print(MACRO_F1_FORMAT % f1_score(labels, maj, average='macro'))
 
 print('====Reasoning-Free Human Performance====')
-print('Accuracy %f' % accuracy_score(labels, r_free))
-print('Macro-F1 %f' % f1_score(labels, r_free, average='macro'))
+print(ACCURACY_FORMAT % accuracy_score(labels, r_free))
+print(MACRO_F1_FORMAT % f1_score(labels, r_free, average='macro'))
 
 print('====Reasoning-Required Human Performance====')
-print('Accuracy %f' % accuracy_score(labels, r_req))
-print('Macro-F1 %f' % f1_score(labels, r_req, average='macro'))
+print(ACCURACY_FORMAT % accuracy_score(labels, r_req))
+print(MACRO_F1_FORMAT % f1_score(labels, r_req, average='macro'))
