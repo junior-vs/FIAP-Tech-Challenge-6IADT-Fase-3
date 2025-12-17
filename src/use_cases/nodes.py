@@ -140,10 +140,24 @@ class RAGNodes:
             return {"is_safe": False, "generation": "Erro na verificação de segurança."}
 
     def retrieve(self, state: AgentState):
-        logger.debug(f"🔍 Buscando protocolos para: {state['medical_question'][:50]}...")
-        documents = self.retriever.invoke(state["medical_question"])
-        logger.info(f"Recuperados {len(documents)} documentos")
-        return {"documents": documents}
+        question = state["medical_question"]
+        logger.debug(f"🔍 Iniciando busca vetorial para: {question[:60]}...")
+        
+        try:
+            documents = self.retriever.invoke(question)
+            logger.info(f"✅ Recuperados {len(documents)} documentos relevantes")
+            
+            # Log estruturado para auditoria
+            logger.bind(
+                query_length=len(question),
+                docs_retrieved=len(documents),
+                sources=[d.metadata.get("source", "unknown") for d in documents]
+            ).info("Busca vetorial concluída")
+            
+            return {"documents": documents}
+        except Exception as e:
+            logger.error(f"❌ Erro na recuperação: {e}", exc_info=True)
+            return {"documents": [], "generation": "Erro técnico ao buscar protocolos."}
 
     def grade_documents(self, state: AgentState):
         logger.debug("Avalia relevância dos documentos...")
