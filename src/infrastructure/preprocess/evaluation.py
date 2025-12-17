@@ -1,13 +1,35 @@
 __author__ = 'Qiao Jin'
+"""
+Script de avaliação de classificação médica.
+Ajustado para o novo contexto: docs/data/knowledge_base/
+
+Uso:
+    python src/infrastructure/preprocess/evaluation.py <predictions_file>
+    
+Exemplo:
+    python src/infrastructure/preprocess/evaluation.py predictions.json
+"""
 
 import json
 from sklearn.metrics import accuracy_score, f1_score
 import sys
+from pathlib import Path
 
 pred_path = sys.argv[1]
 
-ground_truth = json.load(open('data/test_ground_truth.json')) 
-predictions = json.load(open(pred_path))
+# Ajustar para novo caminho da base de conhecimento
+knowledge_base_path = Path("docs/data/knowledge_base")
+ground_truth_file = knowledge_base_path / "ori_pqal" / "test_ground_truth.json"
+pred_file = Path(pred_path)
+
+# Verificar se os arquivos existem
+if not ground_truth_file.exists():
+    raise FileNotFoundError(f"Ground truth não encontrado em: {ground_truth_file}")
+if not pred_file.exists():
+    raise FileNotFoundError(f"Predições não encontradas em: {pred_file}")
+
+ground_truth = json.load(open(ground_truth_file)) 
+predictions = json.load(open(pred_file))
 
 assert set(list(ground_truth)) == set(list(predictions)), 'Please predict all and only the instances in the test set.'
 

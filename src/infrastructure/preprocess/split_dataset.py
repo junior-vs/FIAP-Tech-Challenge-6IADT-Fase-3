@@ -1,14 +1,27 @@
 __author__ = 'Qiao Jin'
 
-'''
-Split the ori dataset to 500 test and 500 CV
-Split the 500 CV to 10 folds
-'''
+"""
+Script de divisão de dataset para validação cruzada (ML).
+Ajustado para novo caminho: docs/data/knowledge_base/
+
+Propósito:
+    - Dividir dataset em train/dev/test
+    - Criar splits de k-fold cross-validation
+    - Estratificar por label para manter proporções
+
+Uso:
+    python src/infrastructure/preprocess/split_dataset.py pqal
+    python src/infrastructure/preprocess/split_dataset.py pqaa
+
+NOTA: Este script é legado. O fluxo atual carrega protocolos XML via VectorStoreRepository.
+      Use este script apenas se precisar re-preparar datasets antigos para análise.
+"""
 
 from functools import reduce
 import json
 import math
 import os
+from pathlib import Path
 import random
 random.seed(0)
 import shutil
@@ -83,27 +96,41 @@ def combine_other(cv_sets, fold):
 
 split_name = sys.argv[1]
 
+# Definir caminho base para dados
+data_path = Path("docs/data/knowledge_base")
+ori_pqal_file = data_path / "ori_pqal" / "ori_pqal.json"
+
 if split_name == 'pqal':
     # 500 for 10-CV and 500 for test
-    dataset = json.load(open('../data/ori_pqal.json'))
+    if not ori_pqal_file.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {ori_pqal_file}")
+    
+    dataset = json.load(open(ori_pqal_file))
 
     CV_set, testset = split(dataset, 2)
-    with open('../data/test_set.json', 'w') as f:
+    test_file = data_path / "ori_pqal" / "test_set.json"
+    with open(test_file, 'w') as f:
         json.dump(testset, f, indent=4)
 
     CV_sets = split(CV_set, 10)
     for i in range(10):
-        if os.path.isdir('../data/pqal_fold%d' % i):
-            shutil.rmtree('../data/pqal_fold%d' % i)
-        os.mkdir('../data/pqal_fold%d' % i)
-        with open('../data/pqal_fold%d/dev_set.json' % i, 'w') as f:
+        fold_dir = data_path / "ori_pqal" / f"pqal_fold{i}"
+        if fold_dir.is_dir():
+            shutil.rmtree(fold_dir)
+        fold_dir.mkdir(parents=True, exist_ok=True)
+        with open(fold_dir / "dev_set.json", 'w') as f:
             json.dump(CV_sets[i], f, indent=4)
-        with open('../data/pqal_fold%d/train_set.json' % i, 'w') as f:
+        with open(fold_dir / "train_set.json", 'w') as f:
             json.dump(combine_other(CV_sets, i), f, indent=4)
 
 elif split_name == 'pqaa':
     # get 200k for training and rest for dev
-    dataset = json.load(open('../data/ori_pqaa.json'))
+    ori_pqaa_file = data_path / "ori_pqaa" / "ori_pqaa.json"
+    
+    if not ori_pqaa_file.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {ori_pqaa_file}")
+    
+    dataset = json.load(open(ori_pqaa_file))
     
     pmids = list(dataset)
     random.shuffle(pmids)
@@ -111,7 +138,10 @@ elif split_name == 'pqaa':
     train_split = {pmid: dataset[pmid] for pmid in pmids[:200000]}
     dev_split = {pmid: dataset[pmid] for pmid in pmids[200000:]}
 
-    with open('../data/pqaa_train_set.json', 'w') as f:
+    train_file = data_path / "ori_pqaa" / "pqaa_train_set.json"
+    dev_file = data_path / "ori_pqaa" / "pqaa_dev_set.json"
+    
+    with open(train_file, 'w') as f:
         json.dump(train_split, f, indent=4)
-    with open('../data/pqaa_dev_set.json', 'w') as f:
+    with open(dev_file, 'w') as f:
         json.dump(dev_split, f, indent=4)

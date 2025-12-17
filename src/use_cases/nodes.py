@@ -167,11 +167,16 @@ class RAGNodes:
 
     def generate(self, state: AgentState):
         logger.debug("Gerando resposta clínica...")
-        context_text = "\n\n".join([d.page_content for d in state["documents"]])
         
-        # Lógica simples de histórico (pode ser melhorada com MemoryStore)
-        history = state.get("chat_history", []) # O novo estado precisa prever onde guardar isso se quisermos persistência
-        history_str = str(history)[-2000:] # Limita tamanho
+        # Garante que documents não é None
+        docs = state.get("documents", [])
+        context_text = "\n\n".join([d.page_content for d in docs]) if docs else "Nenhum protocolo específico encontrado."
+        
+        # Recupera histórico ou inicia lista vazia
+        history = state.get("chat_history", [])
+        
+        # Formata histórico para string (para o prompt)
+        history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in history]) if history else "Sem histórico."
         
         generation = self.rag_chain.invoke({
             "context": context_text, 
@@ -179,6 +184,8 @@ class RAGNodes:
             "chat_history": history_str
         })
         
+        # O histórico real (objeto) deve ser gerenciado no main.py ou aqui se usarmos checkpointer.
+        # Por enquanto, retornamos apenas a geração para ser exibida.
         return {"generation": generation}
 
     def validate_generation(self, state: AgentState):

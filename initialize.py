@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Script para inicializar o vectorstore com o corpus de Machado de Assis.
-Execute isto uma vez antes de usar o sistema RAG.
+Script para inicializar o sistema de assistência médica.
+Configura o vectorstore com protocolos médicos internos.
+Execute isto uma vez antes de usar o assistente.
 """
 
 import sys
 from pathlib import Path
 
-# Add project root to sys.path
+# Adicionar root do projeto ao path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
@@ -17,8 +18,8 @@ from src.infrastructure.llm_factory import LLMFactory
 
 
 def initialize():
-    """Inicializa o vectorstore e testa a conexão com a OpenAI"""
-    print("🔧 Inicializando Sistema Machado Oráculo...\n")
+    """Inicializa o vectorstore e testa conexão com o LLM."""
+    print("🔧 Inicializando Sistema de Assistência Médica...\n")
     
     # 1. Valida configurações
     print("✅ Verificando configurações...")
