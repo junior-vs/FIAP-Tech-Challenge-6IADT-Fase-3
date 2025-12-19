@@ -63,6 +63,11 @@ def main():
                     "documents": [],
                     "generation": "",
                     "hallucination_check": "",
+                    "context_data": "",
+                    "risk_level": "low",
+                    "chat_history": [],
+                    "loop_count": 0,
+                    "is_valid": True,
                 }
                 
                 result = app.invoke(initial_state)

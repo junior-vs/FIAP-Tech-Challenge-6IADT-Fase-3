@@ -180,3 +180,57 @@ class GuardrailsValidator:
             return f"⚠️ {result.reason}"
         else:
             return f"❌ {result.reason}"
+
+
+# ========== Pydantic Models para LangChain ==========
+
+from typing import Literal
+
+class GuardrailsGrade(BaseModel):
+    """
+    Modelo para classificação de relevância médica de perguntas.
+    Usado pelo chain estruturado de guardrails como fallback.
+    """
+    is_safe: Literal["sim", "não"] = Field(
+        description="Indica se a pergunta é segura e apropriada para o contexto médico"
+    )
+    risk_level: Literal["baixo", "médio", "alto"] = Field(
+        description="Nível de risco da pergunta para o sistema médico",
+        default="baixo"
+    )
+    reasoning: str = Field(
+        description="Explicação da decisão de classificação",
+        default=""
+    )
+
+
+class HallucinationGrade(BaseModel):
+    """
+    Modelo para detecção de alucinações na resposta do LLM.
+    Verifica se a resposta está baseada nos documentos fornecidos.
+    """
+    is_grounded: Literal["sim", "não"] = Field(
+        description="Indica se a resposta está baseada nos documentos fornecidos"
+    )
+    confidence: Literal["baixa", "média", "alta"] = Field(
+        description="Nível de confiança na avaliação",
+        default="média"
+    )
+    issues: str = Field(
+        description="Problemas identificados na resposta, se houver",
+        default=""
+    )
+
+
+class DocumentGrade(BaseModel):
+    """
+    Modelo para classificação de relevância de documentos.
+    Usado para filtrar documentos recuperados.
+    """
+    is_relevant: Literal["sim", "não"] = Field(
+        description="Indica se o documento é relevante para a pergunta"
+    )
+    relevance_score: Literal["baixa", "média", "alta"] = Field(
+        description="Pontuação de relevância do documento",
+        default="média"
+    )

@@ -1,31 +1,36 @@
 """
 Módulo: src/domain/state.py
 Descrição: Define a estrutura de dados (Estado) que trafega pelo grafo de decisão.
-Motivo da alteração: Correção de tipagem (documents) e inclusão de campos faltantes (chat_history).
+Motivo da alteração: Correção de tipagem e inclusão de campos para risco e validação.
 """
 
-from typing import List, Any, Optional, Annotated
-import operator
-from typing_extensions import TypedDict
+from typing import Any, List, Optional, TypedDict
+from langchain_core.documents import Document
+
 
 class AgentState(TypedDict):
     """
-    O estado do agente rastreia o fluxo da conversa médica e a tomada de decisão.
+    Estado do agente RAG para manter contexto durante processamento.
+    Todas as chaves são obrigatórias exceto quando marcadas como Optional.
     """
     medical_question: str
     
     # Contexto do paciente (se houver)
     context_data: Optional[str]
     
-    # Documentos recuperados são objetos do LangChain, não apenas strings
-    documents: List[Any] 
+    # Documentos recuperados são objetos do LangChain
+    documents: List[Document] 
     
     generation: str
     
     # Flags de Segurança e Controle
     is_safe: bool
-    risk_level: str
+    risk_level: Optional[str]  # Campo para nível de risco
     
-    # CRÍTICO: Adicionado para manter o histórico e controle de loops
-    chat_history: List[Any]
-    loop_count: int
+    # Controle de histórico e loops
+    chat_history: Optional[List[Any]]
+    loop_count: Optional[int]
+    
+    # Campos para validação de alucinação
+    is_valid: Optional[bool]
+    hallucination_check: Optional[str]
