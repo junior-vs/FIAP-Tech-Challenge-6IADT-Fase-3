@@ -56,7 +56,7 @@ def setup_logging(level: str = "INFO") -> None:
     
     # Handler para arquivo de log (rotação diária)
     logger.add(
-        log_dir / "machado-oraculo.log",
+        log_dir / "assistente-medico.log",
         format=file_format,
         level=level,
         rotation="00:00",  # Rotação diária à meia-noite
@@ -68,7 +68,7 @@ def setup_logging(level: str = "INFO") -> None:
     
     # Handler para erros (arquivo separado)
     logger.add(
-        log_dir / "machado-oraculo-errors.log",
+        log_dir / "assistente-medico-errors.log",
         format=file_format,
         level="ERROR",
         rotation="00:00",

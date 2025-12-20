@@ -1,264 +1,328 @@
-# Machado Oráculo - Assistente Virtual Médico
+# Assistente Médico Virtual
 
-## 🏥 Visão Geral
+Um tutorial completo para construir um assistente de IA médica usando LangChain, LangGraph e Google Gemini. Este projeto demonstra como criar um sistema de suporte a decisões clínicas com validações de segurança e busca baseada em vetores.
 
-**Machado Oráculo** é um assistente virtual médico inteligente, baseado em **Retrieval-Augmented Generation (RAG)**, treinado com protocolos internos do hospital. O sistema auxilia profissionais de saúde com:
+## 📋 Visão Geral do Projeto
 
-- 💊 **Sugestões de condutas clínicas** baseadas em protocolos validados
-- 🔍 **Respostas a dúvidas médicas** com citação de fontes
-- 📋 **Procedimentos recomendados** com base nos protocolos internos
-- 🛡️ **Validação de segurança** contra alucinações e dados sensíveis
+### O que este projeto faz:
 
-## 🎯 Características Principais
+Este assistente médico virtual fornece uma interface de chat interativa onde profissionais de saúde podem fazer perguntas médicas e receber respostas baseadas em evidências, extraídas de protocolos médicos validados. O sistema garante segurança e precisão através de múltiplas camadas de validação.
 
-- ✅ **LLM Determinístico**: Google Gemini 1.5 Flash com temperatura 0.0 para respostas consistentes
-- 📚 **RAG Baseado em XMLs**: Protocolos estruturados em `docs/knowledge_base/`
-- 🔐 **Guardrails de Segurança**: Validação de PII e classificação de risco clínico
-- 🛡️ **Detecção de Alucinações**: Verifica se a resposta está fundamentada nos protocolos
-- 💾 **Vetorização com ChromaDB**: Persistência automática de embeddings
-- 🔄 **Workflow Inteligente**: Grafo LangGraph de 5 nós com roteamento condicional
+### Por que é útil para aprender:
 
-## 🚀 Quick Start
+- **Pipeline RAG completo**: Implementação prática de Retrieval-Augmented Generation
+- **Validações de segurança**: Sistema robusto de guardrails para aplicações médicas
+- **Arquitetura modular**: Código bem estruturado seguindo boas práticas do Python
+- **Gerenciamento de estado**: Uso do LangGraph para fluxos de trabalho complexos
+- **Busca semântica**: Integração com base vetorial (ChromaDB) para recuperação inteligente
 
-### Instalação
+### Tecnologias principais:
 
+- **LangChain**: Orquestração de fluxos de trabalho de IA
+- **LangGraph**: Máquinas de estado para decisões complexas  
+- **Google Gemini**: Modelo de linguagem para geração e compreensão
+- **ChromaDB**: Armazenamento e busca vetorial de documentos médicos
+- **Python 3.8+**: Linguagem principal com práticas modernas
+
+## 🚀 Instruções de Configuração
+
+### Pré-requisitos
+
+Antes de começar, certifique-se de ter instalado:
+
+1. **Python 3.8+** em seu sistema
+2. **Chave da API Google Gemini** - Obtenha uma em [Google AI Studio](https://makersuite.google.com/app/apikey)
+3. **Git** para controle de versão
+
+### Passos de Instalação
+
+1. **Clone o repositório:**
 ```bash
-# Clonar repositório
-git clone https://github.com/seu-hospital/machado-oraculo.git
-cd machado-oraculo
-
-# Instalar dependências
-uv sync
-
-# Configurar variáveis de ambiente
-cp .env.example .env
-# Editar .env e adicionar GEMINI_API_KEY
+git clone [URL-DO-REPOSITORIO]
+cd FIAP-Tech-Challenge-6IADT-Fase-3
 ```
 
-### Inicializar Sistema
-
+2. **Crie um ambiente virtual:**
 ```bash
-# Preparar vectorstore com protocolos
-python initialize.py
+python -m venv .venv
 
-# Iniciar assistente
+# No Linux/Mac:
+source .venv/bin/activate
+
+# No Windows:
+.venv\Scripts\activate
+```
+
+3. **Instale as dependências:**
+```bash
+pip install -r requirements.txt
+```
+
+4. **Configure as variáveis de ambiente:**
+
+Crie um arquivo `.env` na raiz do projeto:
+```bash
+# Sua chave da API Google Gemini (obrigatório)
+GEMINI_API_KEY=sua_chave_aqui
+
+# Modelo a ser usado (opcional - padrão: gemini-1.5-flash)
+MODEL_NAME=gemini-1.5-flash
+
+# Configurações de logging (opcional)
+LOG_LEVEL=INFO
+```
+
+5. **Execute o assistente:**
+```bash
 python src/main.py
 ```
 
-### Uso
+## 🔍 Como Funciona
+
+### Arquitetura do Sistema
+
+O assistente funciona através de um pipeline de 5 etapas implementado como um grafo de estados:
+
+```
+Pergunta do Usuário
+        ↓
+1. 🛡️  Guardrails (Validação de Segurança)
+        ↓
+2. 📚 Retrieve (Busca de Documentos)
+        ↓
+3. ⭐ Grade (Classificação de Relevância)
+        ↓
+4. 🤖 Generate (Geração de Resposta)
+        ↓
+5. ✅ Validate (Validação Anti-Alucinação)
+        ↓
+   Resposta Final
+```
+
+### Componentes Principais
+
+#### 1. **Estado do Agente (`AgentState`)**
+```python
+def create_initial_agent_state(user_question: str) -> AgentState:
+    """
+    Cria o estado inicial que flui através de todo o pipeline.
+    Este estado atua como memória compartilhada entre as etapas.
+    """
+    return {
+        "medical_question": user_question,    # Pergunta original
+        "is_safe": True,                      # Flag de segurança
+        "documents": [],                      # Protocolos encontrados
+        "generation": "",                     # Resposta da IA
+        # ... outros campos
+    }
+```
+
+#### 2. **Validação de Segurança (Guardrails)**
+- Verifica se a pergunta é medicamente relevante
+- Detecta informações pessoais identificáveis (PII)
+- Avalia o nível de risco da pergunta
+- Rejeita perguntas fora do escopo médico
+
+#### 3. **Busca Semântica**
+```python
+# O sistema converte a pergunta em vetores e busca documentos similares
+documents = retriever.invoke(user_question)
+# Usa embeddings do Google para encontrar protocolos relevantes
+```
+
+#### 4. **Geração de Resposta**
+- Usa Google Gemini com temperatura 0.0 (determinística)
+- Baseia respostas apenas nos documentos recuperados
+- Inclui citações dos protocolos consultados
+
+#### 5. **Validação Anti-Alucinação**
+- Compara a resposta gerada com os documentos fonte
+- Rejeita respostas que não são suportadas pelos protocolos
+- Garante precisão factual das informações
+
+### Fluxo de Processamento Detalhado
+
+#### **Função `process_medical_question()`**
+```python
+def process_medical_question(app, user_question: str) -> Dict[str, Any]:
+    """
+    Etapas do Pipeline:
+    1. Guardrails: Verifica segurança e relevância médica
+    2. Recuperação: Encontra documentos relevantes
+    3. Classificação: Filtra por relevância
+    4. Geração: Cria resposta baseada nos documentos
+    5. Validação: Verifica precisão contra fontes
+    """
+    initial_state = create_initial_agent_state(user_question)
+    final_state = app.invoke(initial_state)  # Executa todo o pipeline
+    return final_state
+```
+
+#### **Gerenciamento da Interface (`handle_chat_loop()`)**
+```python
+def handle_chat_loop(app) -> None:
+    """
+    Loop principal de interação:
+    - Obtém entrada do usuário
+    - Processa através do pipeline de IA
+    - Exibe resposta e fontes consultadas
+    - Trata erros graciosamente
+    """
+    while True:
+        user_input = get_user_input()
+        if should_exit_application(user_input):
+            break
+        
+        result = process_medical_question(app, user_input)
+        display_response(result)
+        display_sources(result)
+```
+
+## 💻 Exemplo de Uso
+
+### Executando o Assistente
 
 ```bash
-👨‍⚕️  Você (Médico): Qual é o protocolo de tratamento para sepse em idosos?
+# Active o ambiente virtual
+source .venv/bin/activate
 
-🤖 Assistente: [Resposta com citação de protocolos]
+# Execute o programa principal
+python src/main.py
+```
 
-💡 Digite 'sair' para encerrar ou 'limpar' para reiniciar histórico.
+### Sessão de Exemplo
+
+```
+======================================================================
+🏥  Assistente Médico Virtual
+======================================================================
+
+📋 Sistema de suporte a decisões clínicas baseado em protocolos internos
+Desenvolvido com LangChain + LangGraph + Google Gemini
+
+----------------------------------------------------------------------
+💬 Digite suas dúvidas clínicas (ou 'sair' para encerrar)
+
+👨‍⚕️  Você: Quais são as indicações para prescrição de antibióticos em infecções respiratórias?
+
+🔍 Processando pergunta...
+
+🤖 Assistente: Com base nos protocolos consultados, os antibióticos são indicados 
+em infecções respiratórias nas seguintes situações:
+
+1. **Pneumonia bacteriana confirmada**: Presença de infiltrado pulmonar em 
+   radiografia de tórax associado a sintomas como febre, tosse produtiva e 
+   leucocitose.
+
+2. **Sinusite bacteriana aguda**: Quando há sintomas persistentes por mais de 
+   10 dias ou piora após melhora inicial.
+
+3. **Faringite estreptocócica**: Confirmada por teste rápido ou cultura positiva
+   para Streptococcus pyogenes.
+
+É importante evitar o uso em infecções virais, que representam a maioria dos 
+casos de infecções respiratórias superiores.
+
+📚 Protocolos consultados:
+   • protocolo_antibioticos_respiratorios.xml
+   • diretrizes_pneumonia_ambulatorial.xml
+   • manual_prescricao_racional.xml
+
+👨‍⚕️  Você: sair
+
+👋 Encerrando assistente médico. Até logo!
+```
+
+## 🎯 Saída de Exemplo
+
+### Resposta Bem-Sucedida
+```
+🤖 Assistente: [Resposta médica baseada em evidências]
+
+📚 Protocolos consultados:
+   • protocolo_cardiologia_2023.xml
+   • diretrizes_hipertensao.xml
+   ... e mais 2 protocolos
+```
+
+### Pergunta Rejeitada por Segurança
+```
+⚠️  Assistente: Pergunta fora do escopo médico.
+```
+
+### Falha na Validação
+```
+⚠️  Assistente: Não foi possível gerar uma resposta confiável.
 ```
 
 ## 📁 Estrutura do Projeto
 
 ```
-machado-oraculo/
-├── src/
-│   ├── domain/
-│   │   ├── state.py                # AgentState para fluxo de dados
-│   │   └── guardrails_check.py     # Validação e modelos Pydantic
-│   ├── infrastructure/
-│   │   ├── llm_factory.py          # Factory pattern para LLM/Embeddings
-│   │   ├── vector_store.py         # Gerencimento de ChromaDB
-│   │   └── preprocess/             # Scripts de preparação (legado)
-│   ├── use_cases/
-│   │   ├── graph.py                # Orquestração LangGraph
-│   │   └── nodes.py                # Implementação dos 5 nós
-│   ├── utils/
-│   │   └── logging.py              # Configuração de logs
-│   ├── config.py                   # Gerenciamento de configurações
-│   └── main.py                     # Entry point CLI
-├── docs/
-│   ├── data/knowledge_base/
-│   │   ├── 7_SeniorHealth_QA/      # Protocolos médicos (XMLs)
-│   │   ├── ori_pqal/               # Dataset legado
-│   │   └── CATALOG.md              # Índice da base de conhecimento
-│   └── spec/                       # Especificações técnicas
-├── tests/
-│   └── unit/                       # Testes unitários
-├── vectorstore/
-│   └── chroma_db/                  # Persistência de embeddings
-├── initialize.py                   # Setup inicial
-├── pyproject.toml                  # Dependências
-└── README.md                       # Este arquivo
+src/
+├── main.py                 # 🎯 Script principal - Interface de chat
+├── config.py              # ⚙️  Configurações e variáveis de ambiente
+├── domain/
+│   ├── state.py           # 📊 Definição do estado do agente
+│   └── guardrails.py      # 🛡️  Modelos de validação Pydantic
+├── use_cases/
+│   ├── graph.py          # 🔧 Construção do grafo LangGraph
+│   └── nodes.py          # 🔗 Implementação dos nós de processamento
+├── infrastructure/
+│   ├── llm_factory.py    # 🤖 Factory para modelos de linguagem
+│   └── vector_store.py   # 📚 Repositório da base vetorial
+└── utils/
+    └── logging.py        # 📝 Configuração de logs
+
+docs/knowledge_base/       # 📖 Protocolos médicos em XML
+data/chroma_db/           # 💾 Base de dados vetorial persistente
 ```
 
-## 🔧 Arquitetura
+## 🎓 Conceitos Aprendidos
 
-### Fluxo de Execução (5 Nós)
+### 1. **RAG (Retrieval-Augmented Generation)**
+- Como combinar busca semântica com geração de linguagem
+- Implementação de pipeline de recuperação de documentos
+- Integração de embeddings e LLMs
 
-```
-1. GUARDRAILS
-   ↓ Validação de PII, relevância médica, risco
-   ├─ Seguro? → Continua
-   └─ Inseguro? → Encerra com recusa
+### 2. **LangGraph para Fluxos Complexos**
+- Criação de máquinas de estado com múltiplos nós
+- Gerenciamento de estado compartilhado entre etapas
+- Roteamento condicional baseado em resultados
 
-2. RETRIEVE
-   ↓ Busca vetorial em ChromaDB
-   └─ Retorna documentos relevantes
+### 3. **Validações de Segurança em IA**
+- Implementação de guardrails para aplicações críticas
+- Detecção e prevenção de alucinações
+- Validação de entrada e saída
 
-3. GRADE
-   ↓ Classifica relevância dos documentos
-   └─ Filtra documentos inúteis
+### 4. **Busca Vetorial**
+- Uso do ChromaDB para armazenamento persistente
+- Conversão de texto em embeddings
+- Busca por similaridade semântica
 
-4. GENERATE
-   ↓ LLM gera resposta com contexto
-   └─ Inclui citações de protocolos
+### 5. **Boas Práticas de Python**
+- Estrutura modular e separação de responsabilidades
+- Type hints e documentação clara
+- Tratamento robusto de erros
+- Configuração através de variáveis de ambiente
 
-5. VALIDATE
-   ↓ Detecção de alucinações
-   ├─ Válido? → Retorna resposta
-   └─ Alucinação? → Rejeita e avisa
-```
+## 🚀 Próximos Passos
 
-### Estado de Fluxo (AgentState)
+Para expandir este projeto, considere:
 
-```python
-{
-    "medical_question": str,        # Pergunta do médico
-    "context_data": Optional[str],  # Info anonimizada do paciente
-    "documents": List[str],         # Protocolos recuperados
-    "generation": str,              # Resposta gerada
-    "is_safe": bool,                # Flag de segurança
-    "risk_level": str,              # "informativo" | "emergencia" | ...
-}
-```
+1. **Interface Web**: Criar uma interface React ou Streamlit
+2. **Mais Validadores**: Adicionar validações específicas por especialidade
+3. **Cache Inteligente**: Implementar cache de respostas frequentes
+4. **Métricas**: Adicionar monitoramento de qualidade das respostas
+5. **API REST**: Transformar em serviço web com FastAPI
 
-## 📚 Adicionando Protocolos Médicos
+## 🤝 Contribuições
 
-### 1. Preparar Protocolo XML
-
-Salvar em `docs/knowledge_base/7_SeniorHealth_QA/`
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<Protocol>
-  <Metadata>
-    <ID>0000101</ID>
-    <Title>Protocolo de Tratamento de Sepse em Idosos</Title>
-    <Version>1.0</Version>
-    <LastUpdated>2025-01-15</LastUpdated>
-    <Authority>Hospital Universitário</Authority>
-  </Metadata>
-  <Content>
-    <Section>
-      <Name>Diagnóstico</Name>
-      <Text>Critérios de qSOFA: ...</Text>
-    </Section>
-  </Content>
-</Protocol>
-```
-
-### 2. Reiniciar Sistema
-
-O `VectorStoreRepository` recarrega automaticamente na próxima execução:
-
-```bash
-# Vectorstore é invalidado, novos embeddings criados
-python src/main.py
-```
-
-## 🧪 Testes
-
-```bash
-# Executar testes unitários
-pytest tests/unit/ -v
-
-# Com cobertura
-pytest tests/unit/ --cov=src --cov-report=html
-```
-
-## 🔐 Segurança
-
-- ✅ **Zero Temperature**: LLM determinístico, sem alucinações por aleatoriedade
-- ✅ **Guardrails**: Validação de input contra PII (CPF, email, etc.)
-- ✅ **Alucinação Check**: Verifica se resposta está nos protocolos
-- ✅ **HTTPS Only**: Todas as chamadas externas usam HTTPS
-- ⚠️ **Dados Sensíveis**: Implementar anonymizer com Presidio (TODO)
-
-## 📊 Monitoramento
-
-### Logs Estruturados
-
-```bash
-# Logs em tempo real
-tail -f logs/machado.log
-
-# Filtrar por nível
-grep "ERROR\|WARNING" logs/machado.log
-```
-
-### Métricas
-
-```python
-# Adicionar tracking em produção
-from opentelemetry import metrics
-provider = MeterProvider()
-meter = provider.get_meter(__name__)
-```
-
-## 🚀 Deployment
-
-### Docker
-
-```dockerfile
-FROM python:3.10-slim
-WORKDIR /app
-COPY pyproject.toml uv.lock ./
-RUN pip install uv && uv sync --no-dev
-COPY . .
-CMD ["python", "src/main.py"]
-```
-
-```bash
-docker build -t machado-oraculo .
-docker run -e GEMINI_API_KEY=xxx machado-oraculo
-```
-
-### Variáveis de Ambiente
-
-| Variável | Descrição | Padrão |
-|----------|-----------|--------|
-| `GEMINI_API_KEY` | Chave da API Google Gemini | **Obrigatória** |
-| `MODEL_NAME` | Modelo Gemini a usar | `gemini-1.5-flash` |
-| `TEMPERATURE` | Temperatura do LLM | `0.0` |
-| `DOCS_PATH` | Caminho para protocolos | `docs/knowledge_base` |
-| `VECTOR_DB_PATH` | Caminho para ChromaDB | `data/chroma_db` |
-
-## 📝 Changelog
-
-### v0.1.0 (2025-01-15)
-- ✅ Implementação de RAG com 5 nós
-- ✅ Validação de segurança (guardrails)
-- ✅ Detecção de alucinações
-- ✅ CLI interativa com histórico
-- ⚠️ Anonymizer (em desenvolvimento)
-- ⚠️ Cache Redis (em desenvolvimento)
-
-## 🤝 Contribuindo
-
-1. Fork o repositório
-2. Crie feature branch (`git checkout -b feature/MinhaFeature`)
-3. Commit mudanças (`git commit -am 'Adiciona MinhaFeature'`)
-4. Push para branch (`git push origin feature/MinhaFeature`)
-5. Abra Pull Request
-
-## 📄 Licença
-
-Proprietary - Hospital Universitário
-
-## 📞 Suporte
-
-- 📧 Email: dev-team@hospital.com
-- 💬 Slack: #machado-oraculo-dev
-- 📚 Wiki: [Documentação Interna](https://wiki.hospital.com/machado-oraculo)
+Este é um projeto educacional. Sinta-se à vontade para:
+- Fazer fork e experimentar
+- Sugerir melhorias
+- Reportar issues
+- Compartilhar casos de uso interessantes
 
 ---
 
-**Desenvolvido com ❤️ para auxiliar profissionais de saúde**
+**⚠️ Aviso Importante**: Este assistente é apenas para fins educacionais e de pesquisa. Não deve ser usado para diagnósticos reais sem supervisão médica apropriada.
