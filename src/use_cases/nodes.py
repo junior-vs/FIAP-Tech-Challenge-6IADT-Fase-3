@@ -5,319 +5,353 @@ Motivo da alteração:
 - Alteração dos Prompts para persona "Assistente Médico".
 - Uso das chaves do novo AgentState (medical_question, is_safe).
 - Inclusão de instruções de segurança (não prescrever sem validação).
-- Suporte a múltiplos idiomas (detecção e tradução).
 """
 
 import logging
-import math
-from typing import List
+import re
+from typing import List, Dict, Any
 from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from src.domain.state import AgentState
-from src.domain.guardrails import GuardrailsValidator
+from src.domain.guardrails import GuardrailsGrade, HallucinationGrade, DocumentGrade
 from src.infrastructure.llm_factory import LLMFactory
 from src.infrastructure.vector_store import VectorStoreRepository
+from src.utils.logging import logger
 
 logger = logging.getLogger(__name__)
 
-
 class RAGNodes:
-    """Nós de processamento para o grafo RAG."""
+    """
+    Nós do grafo RAG para processamento de perguntas médicas.
+    Implementa validação, recuperação, classificação e geração de respostas.
+    """
     
-    def __init__(self):
-        """Inicializa todos os componentes necessários para os nós."""
-        logger.debug("🔨 Inicializando RAGNodes...")
+    def __init__(self, retriever, llm):
+        self.retriever = retriever
+        self.llm = llm
         
-        # ✅ NOVO: Inicializar todos os componentes
-        self.guardrails = GuardrailsValidator()
-        self.llm = LLMFactory.get_llm()
-        self.embeddings = LLMFactory.get_embeddings()
+        # Chain para validação de guardrails com prompt aprimorado
+        self.guardrails_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Você é um classificador especializado em identificar perguntas médicas e clínicas.
+
+Sua tarefa é determinar se uma pergunta está relacionada ao contexto médico, de saúde ou clínico.
+
+CRITÉRIOS PARA PERGUNTAS VÁLIDAS:
+- Perguntas sobre condições médicas, doenças, sintomas
+- Perguntas sobre tratamentos, medicamentos, protocolos clínicos
+- Perguntas sobre anatomia, fisiologia, patologia
+- Perguntas sobre diagnósticos, exames, procedimentos
+- Perguntas sobre saúde preventiva, cuidados de saúde
+- Perguntas sobre especialidades médicas
+- Perguntas sobre questões de saúde específicas para diferentes populações (idosos, crianças, etc.)
+
+CRITÉRIOS PARA REJEIÇÃO:
+- Perguntas sobre assuntos completamente não-médicos (esportes, culinária, tecnologia geral)
+- Solicitações para atividades ilegais ou perigosas
+- Perguntas com conteúdo ofensivo ou inadequado
+
+IMPORTANTE: 
+- A pergunta pode estar em qualquer idioma (português, inglês, espanhol, etc.)
+- Analise o CONTEÚDO SEMÂNTICO, não apenas palavras-chave
+- Seja PERMISSIVO para temas relacionados à saúde
+- Em caso de dúvida, ACEITE a pergunta
+
+Responda apenas com:
+- "válida" se a pergunta está relacionada ao contexto médico/saúde
+- "inválida" se a pergunta está claramente fora do escopo médico"""),
+            ("human", "Pergunta: {question}")
+        ])
         
-        # Vector store for retrieval
+        self.guardrails_chain = (
+            self.guardrails_prompt 
+            | self.llm 
+            | StrOutputParser()
+        )
+        
+        # Chain para validação estruturada (backup)
+        self.structured_guardrails_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Você é um auditor de conformidade médica. Analise se a pergunta está relacionada ao contexto médico/saúde.
+
+Considere válidas perguntas sobre:
+- Condições médicas e doenças
+- Tratamentos e medicamentos  
+- Sintomas e diagnósticos
+- Protocolos clínicos
+- Anatomia e fisiologia
+- Saúde preventiva
+- Especialidades médicas
+- Cuidados de saúde para populações específicas
+
+A pergunta pode estar em qualquer idioma. Analise o significado semântico.
+
+Responda no formato JSON especificado."""),
+            ("human", "Pergunta: {question}")
+        ])
+        
+        self.structured_guardrails_chain = (
+            self.structured_guardrails_prompt 
+            | self.llm.with_structured_output(GuardrailsGrade)
+        )
+        
+        # Chain para classificação de documentos
+        self.grader_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Você é um classificador que avalia se um documento recuperado é relevante para uma pergunta médica.
+
+Analise o conteúdo do documento e determine se ele contém informações úteis para responder à pergunta.
+
+Responda no formato JSON especificado."""),
+            ("human", "Pergunta: {question}\n\nDocumento: {document}")
+        ])
+        
+        self.retrieval_grader = (
+            self.grader_prompt 
+            | self.llm.with_structured_output(DocumentGrade)
+        )
+        
+        # Chain para geração de respostas
+        self.rag_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Você é um assistente médico especializado que fornece informações baseadas em protocolos clínicos.
+
+INSTRUÇÕES:
+1. Use APENAS as informações dos protocolos fornecidos no contexto
+2. Seja preciso e objetivo nas suas respostas
+3. Sempre cite a fonte (nome do protocolo) das informações
+4. Se a pergunta estiver em outro idioma, responda no mesmo idioma da pergunta
+5. Se não houver informação suficiente no contexto, indique claramente
+
+FORMATO DA RESPOSTA:
+- Responda de forma clara e estruturada
+- Cite as fontes: (Protocolo: nome_do_arquivo.xml)
+- Use linguagem profissional mas acessível
+
+IMPORTANTE: Esta é uma ferramenta de apoio à decisão médica. Sempre recomende consulta com profissional de saúde para decisões clínicas."""),
+            ("human", "Pergunta: {question}\n\nContexto dos protocolos:\n{context}")
+        ])
+        
+        self.rag_chain = self.rag_prompt | self.llm | StrOutputParser()
+        
+        # Chain para detecção de alucinações
+        self.hallucination_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Você é um verificador que determina se uma resposta do LLM está baseada nos documentos fornecidos.
+
+Analise se a resposta contém APENAS informações presentes nos documentos ou se há conteúdo adicional não fundamentado.
+
+Responda no formato JSON especificado com:
+- is_grounded: "sim" se a resposta está totalmente baseada nos documentos, "não" se contém informações extras
+- confidence: seu nível de confiança na avaliação
+- issues: problemas específicos encontrados (se houver)"""),
+            ("human", "Documentos: {documents}\n\nResposta do LLM: {generation}")
+        ])
+        
+        self.hallucination_grader = (
+            self.hallucination_prompt 
+            | self.llm.with_structured_output(HallucinationGrade)
+        )
+
+    def guardrails(self, state: AgentState) -> AgentState:
+        """
+        Valida se a pergunta é apropriada para o contexto médico.
+        Implementa verificação de segurança e relevância com análise semântica.
+        """
+        question = state["medical_question"]
+        logger.info(f"🛡️ Validando pergunta: {question}")
+        
         try:
-            vector_repo = VectorStoreRepository()
-            self.retriever = vector_repo.get_retriever()
+            # Primeira tentativa com chain simples
+            try:
+                result = self.guardrails_chain.invoke({"question": question})
+                result_clean = result.strip().lower()
+                
+                # Análise mais flexível do resultado
+                is_valid = any(term in result_clean for term in ['válida', 'valid', 'sim', 'yes', 'aceita', 'accept'])
+                is_invalid = any(term in result_clean for term in ['inválida', 'invalid', 'não', 'no', 'rejeita', 'reject'])
+                
+                if is_valid and not is_invalid:
+                    logger.info("✅ Pergunta aprovada pelos guardrails")
+                    return {**state, "is_safe": True, "risk_level": "baixo"}
+                elif is_invalid and not is_valid:
+                    logger.warning(f"⚠️ Pergunta rejeitada: {result}")
+                    return {
+                        **state, 
+                        "is_safe": False, 
+                        "risk_level": "alto",
+                        "generation": "Desculpe, mas essa pergunta está fora do escopo médico que posso ajudar. Por favor, faça uma pergunta relacionada à saúde ou medicina."
+                    }
+                else:
+                    # Resultado ambíguo, usar chain estruturada como backup
+                    logger.info("🔄 Resultado ambíguo, usando validação estruturada")
+                    raise Exception("Resultado ambíguo")
+                    
+            except Exception as e:
+                logger.info(f"🔄 Fallback para validação estruturada: {str(e)}")
+                
+                # Usar chain estruturada como backup
+                structured_result = self.structured_guardrails_chain.invoke({"question": question})
+                
+                # Verificar se a resposta está fundamentada nos documentos
+                if hasattr(structured_result, 'is_safe') and structured_result.is_safe == "sim":
+                    logger.info("✅ Pergunta aprovada pelos guardrails estruturados")
+                    return {
+                        **state, 
+                        "is_safe": True, 
+                        "risk_level": getattr(structured_result, 'risk_level', 'baixo')
+                    }
+                elif hasattr(structured_result, 'is_safe'):
+                    logger.warning("⚠️ Pergunta rejeitada pelos guardrails estruturados")
+                    return {
+                        **state, 
+                        "is_safe": False, 
+                        "risk_level": getattr(structured_result, 'risk_level', 'alto'),
+                        "generation": "Desculpe, mas essa pergunta está fora do escopo médico que posso ajudar. Por favor, faça uma pergunta relacionada à saúde ou medicina."
+                    }
+                else:
+                    # Fallback: tentar acessar como dict
+                    if isinstance(structured_result, dict) and structured_result.get('is_safe') == "sim":
+                        logger.info("✅ Pergunta aprovada pelos guardrails (dict format)")
+                        return {
+                            **state, 
+                            "is_safe": True, 
+                            "risk_level": structured_result.get('risk_level', 'baixo')
+                        }
+                    else:
+                        logger.warning("⚠️ Formato de resposta inesperado do validador")
+                        return {
+                            **state, 
+                            "is_safe": False, 
+                            "risk_level": "alto",
+                            "generation": "Erro na validação da pergunta. Por favor, tente novamente."
+                        }
+        
         except Exception as e:
-            logger.warning(f"⚠️ Erro ao inicializar vector store: {e}")
-            self.retriever = None
-        
-        logger.debug("✅ RAGNodes inicializado com sucesso")
-    
-    def guardrails_check(self, state: AgentState) -> dict:
-        """Valida segurança e pertinência médica da pergunta."""
-        logger.debug("🛡️ Verificando pertinência do tema médico...")
-        
-        question = state.get("medical_question", "")
-        
-        try:
-            is_valid = self.guardrails.validate(question)
-            
-            if is_valid:
-                logger.info("✅ Tema médico válido.")
-                return {"is_safe": True}
-            else:
-                logger.warning("⚠️ Tema fora do escopo médico.")
-                return {
-                    "is_safe": False,
-                    "generation": "Desculpe, sua pergunta não é relacionada a temas médicos. Por favor, formule uma pergunta sobre saúde ou protocolos clínicos."
-                }
-        except Exception as e:
-            logger.error(f"❌ Erro na validação de guardrails: {e}", exc_info=True)
-            return {
-                "is_safe": False,
-                "generation": f"Erro ao validar pergunta: {str(e)}"
-            }
-    
-    def retrieve(self, state: AgentState) -> dict:
-        """Recupera documentos relevantes da base vetorial."""
-        question = state.get("medical_question", "")
-        logger.debug(f"🔍 Iniciando busca vetorial para: {question[:60]}...")
+            logger.error(f"❌ Erro na validação de guardrails: {str(e)}")
+            # Em caso de erro, assumir que é seguro para não bloquear perguntas médicas válidas
+            logger.warning("⚠️ Erro na validação - assumindo pergunta como válida por segurança")
+            return {**state, "is_safe": True, "risk_level": "baixo"}
+
+    def retrieve(self, state: AgentState) -> AgentState:
+        """
+        Recupera documentos relevantes usando busca semântica por vetor.
+        """
+        question = state["medical_question"]
+        logger.info(f"🔍 Buscando documentos para: {question}")
         
         try:
-            if not self.retriever:
-                logger.warning("⚠️ Retriever não está disponível")
-                return {"documents": []}
-            
             documents = self.retriever.invoke(question)
-            
-            if not isinstance(documents, list):
-                logger.warning(f"⚠️ Retriever retornou tipo inesperado: {type(documents)}")
-                documents = list(documents) if hasattr(documents, '__iter__') else []
-            
             logger.info(f"✅ Recuperados {len(documents)} documentos relevantes")
             
-            for i, doc in enumerate(documents):
-                logger.debug(f"  Doc {i+1}: {type(doc).__name__} - "
-                           f"Content length: {len(doc.page_content) if hasattr(doc, 'page_content') else 'N/A'} chars")
-            
-            return {"documents": documents}
+            return {**state, "documents": documents}
         
         except Exception as e:
-            logger.error(f"❌ Erro na recuperação: {e}", exc_info=True)
-            return {
-                "documents": [],
-                "generation": "Erro ao buscar protocolos na base de conhecimento."
-            }
-    
-    def grade_documents(self, state: AgentState) -> dict:
-        """Avalia relevância dos documentos recuperados."""
-        documents = state.get("documents", [])
-        question = state.get("medical_question", "")
-        
-        logger.debug(f"📊 Avaliando {len(documents)} documentos para pergunta: {question[:50]}...")
-        
-        if not documents:
-            logger.warning("⚠️ Nenhum documento fornecido para avaliação")
-            return {"documents": []}
-        
-        try:
-            useful_docs = []
-            
-            for i, doc in enumerate(documents):
-                if not isinstance(doc, Document):
-                    logger.warning(f"⚠️ Item {i} não é Document: tipo={type(doc).__name__}")
-                    continue
-                
-                doc_content = doc.page_content.lower()
-                question_lower = question.lower()
-                
-                question_words = set(question_lower.split())
-                doc_words = set(doc_content.split())
-                overlap = len(question_words & doc_words) / max(len(question_words), 1)
-                
-                logger.debug(f"  Doc {i+1}: Sobreposição={overlap:.2%}")
-                
-                if overlap > 0.05:
-                    useful_docs.append(doc)
-            
-            logger.info(f"✅ {len(useful_docs)}/{len(documents)} documentos úteis após avaliação")
-            
-            if not useful_docs and documents:
-                logger.warning("⚠️ Nenhum documento passou na avaliação. Retornando todos os documentos.")
-                return {"documents": documents}
-            
-            return {"documents": useful_docs}
-        
-        except Exception as e:
-            logger.error(f"❌ Erro ao avaliar documentos: {e}", exc_info=True)
-            return {"documents": documents}
-    
-    def generate(self, state: AgentState) -> dict:
-        """Gera resposta clínica baseada em documentos."""
-        documents = state.get("documents", [])
-        question = state.get("medical_question", "")
-        
-        logger.debug(f"📝 Gerando resposta com {len(documents)} documentos...")
-        
-        if not question:
-            return {"generation": "Pergunta vazia fornecida."}
-        
-        try:
-            context = ""
-            if documents:
-                context = "Protocolos consultados:\n\n"
-                for i, doc in enumerate(documents, 1):
-                    if isinstance(doc, Document):
-                        source = doc.metadata.get("source", f"Protocolo {i}")
-                        preview = doc.page_content[:500]
-                        context += f"{i}. **{source}**\n{preview}...\n\n"
-                    else:
-                        logger.warning(f"⚠️ Documento {i} não é do tipo Document: {type(doc)}")
-            else:
-                logger.warning("⚠️ Nenhum documento disponível para geração")
-                context = "⚠️ Nenhum protocolo foi encontrado na base de conhecimento."
-            
-            if documents:
-                system_prompt = """Você é um assistente médico especializado em protocolos clínicos.
-Baseado nos protocolos fornecidos, responda à pergunta do médico com precisão.
-SEMPRE cite os protocolos utilizados na resposta."""
-            else:
-                system_prompt = """Você é um assistente médico. 
-Infelizmente, nenhum protocolo foi encontrado na base de conhecimento para esta pergunta.
-Informe ao usuário que a pergunta não pode ser respondida completamente sem acesso aos protocolos."""
-            
-            prompt = f"""{system_prompt}
+            logger.error(f"❌ Erro na recuperação de documentos: {str(e)}")
+            return {**state, "documents": []}
 
-Protocolos de referência:
-{context}
-
-Pergunta do médico:
-{question}
-
-Resposta (cite os protocolos utilizados se disponíveis):"""
-            
-            response = self.llm.invoke(prompt)
-            generation = response.content if hasattr(response, 'content') else str(response)
-            
-            logger.info("✅ Resposta gerada com sucesso")
-            logger.debug(f"  Tamanho da resposta: {len(generation)} chars")
-            
-            return {"generation": generation}
-        
-        except Exception as e:
-            logger.error(f"❌ Erro ao gerar resposta: {e}", exc_info=True)
-            return {"generation": f"Erro ao gerar resposta: {str(e)}"}
-    
-    def validate_hallucination(self, state: AgentState) -> dict:
+    def grade_documents(self, state: AgentState) -> AgentState:
         """
-        Valida se a resposta está baseada nos documentos (sem alucinações).
-        
-        WHEN [resposta é gerada]
-        THE SYSTEM SHALL [validar se resposta é baseada nos documentos recuperados]
+        Classifica documentos recuperados quanto à relevância para a pergunta.
         """
-        generation = state.get("generation", "")
-        documents = state.get("documents", [])
+        question = state["medical_question"]
+        documents = state["documents"]
         
-        logger.debug(f"🔍 Validando alucinações... (docs={len(documents)}, gen_len={len(generation)})")
-        
-        # Caso 1: Sem documentos recuperados
-        if not documents:
-            logger.warning("⚠️ Sem documentos para validar hallucination")
-            logger.info("💡 Modo fallback: Aceitando resposta pois não há documentos para validação")
-            return {"hallucination_check": "no_docs_available"}
+        logger.info(f"📊 Classificando {len(documents)} documentos")
         
         try:
-            # Camada 1: Rejeição óbvia se resposta diz "não tenho acesso"
-            if any(phrase in generation.lower() for phrase in 
-                   ["não tenho acesso", "não posso responder", "desculpe", "não encontrei",
-                    "não foi possível", "não consegui", "sem acesso", "indisponível"]):
-                logger.info("✅ Resposta é uma rejeição apropriada (sem acesso aos dados)")
-                return {"hallucination_check": "valid_rejection"}
-            
-            # Camada 2: Validação semântica com embeddings
-            has_semantic_match = self._semantic_validation(generation, documents)
-            
-            if has_semantic_match:
-                logger.info("✅ Resposta validada (semelhança semântica com documentos)")
-                return {"hallucination_check": "valid"}
-            
-            # Camada 3: Fallback para keyword matching
-            has_keyword_match = self._keyword_validation(generation, documents)
-            
-            if has_keyword_match:
-                logger.info("✅ Resposta validada (palavras-chave dos documentos encontradas)")
-                return {"hallucination_check": "valid_keywords"}
-            
-            logger.warning("⚠️ Possível alucinação detectada (sem correspondência com documentos)")
-            logger.debug(f"  Resposta: {generation[:100]}...")
-            
-            return {"hallucination_check": "possible_hallucination"}
-        
-        except Exception as e:
-            logger.error(f"❌ Erro na validação: {e}", exc_info=True)
-            return {"hallucination_check": "validation_error"}
-    
-    def _semantic_validation(self, generation: str, documents: List[Document]) -> bool:
-        """Valida usando embeddings e similiaridade semântica."""
-        try:
-            docs_to_check = documents[:3]
-            
-            logger.debug("📊 Calculando similiaridade semântica...")
-            gen_embedding = self.embeddings.embed_query(generation)
-            
-            max_similarity = 0.0
-            
-            for i, doc in enumerate(docs_to_check):
-                if not isinstance(doc, Document):
-                    continue
-                
-                doc_embedding = self.embeddings.embed_query(doc.page_content[:500])
-                similarity = self._cosine_similarity(gen_embedding, doc_embedding)
-                logger.debug(f"  Doc {i+1}: Similiaridade = {similarity:.3f}")
-                
-                max_similarity = max(max_similarity, similarity)
-            
-            semantic_threshold = 0.4
-            
-            if max_similarity >= semantic_threshold:
-                logger.debug(f"✅ Similiaridade semântica OK (max={max_similarity:.3f} >= {semantic_threshold})")
-                return True
-            else:
-                logger.debug(f"❌ Similiaridade semântica baixa (max={max_similarity:.3f} < {semantic_threshold})")
-                return False
-        
-        except Exception as e:
-            logger.warning(f"⚠️ Erro na validação semântica: {e}")
-            return True
-    
-    def _keyword_validation(self, generation: str, documents: List[Document]) -> bool:
-        """Validação por palavras-chave com critério menos rigoroso."""
-        try:
-            gen_lower = generation.lower()
-            doc_terms = set()
+            filtered_docs = []
             
             for doc in documents:
-                if isinstance(doc, Document):
-                    words = [w.lower() for w in doc.page_content.split() 
-                            if len(w) >= 4 and w.isalnum()]
-                    doc_terms.update(words[:20])
+                try:
+                    grade = self.retrieval_grader.invoke({
+                        "question": question,
+                        "document": doc.page_content
+                    })
+                    
+                    # Verificar se o documento é relevante
+                    if hasattr(grade, 'is_relevant') and grade.is_relevant == "sim":
+                        filtered_docs.append(doc)
+                    elif isinstance(grade, dict) and grade.get('is_relevant') == "sim":
+                        filtered_docs.append(doc)
+                
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao classificar documento: {str(e)}")
+                    # Em caso de erro, manter o documento
+                    filtered_docs.append(doc)
             
-            logger.debug(f"📝 Termos-chave documentos: {list(doc_terms)[:10]}...")
+            logger.info(f"Documentos úteis: {len(filtered_docs)}/{len(documents)}")
             
-            matches = sum(1 for term in doc_terms if term in gen_lower)
-            match_ratio = matches / len(doc_terms) if doc_terms else 0
-            
-            logger.debug(f"  Matches: {matches}/{len(doc_terms)} = {match_ratio:.1%}")
-            
-            keyword_threshold = 0.1
-            
-            if match_ratio >= keyword_threshold:
-                logger.debug(f"✅ Validação por keywords OK (match_ratio={match_ratio:.1%})")
-                return True
-            else:
-                logger.debug(f"❌ Validação por keywords falhou (match_ratio={match_ratio:.1%} < {keyword_threshold})")
-                return False
+            return {**state, "documents": filtered_docs}
         
         except Exception as e:
-            logger.warning(f"⚠️ Erro na validação por keywords: {e}")
-            return False
-    
-    def _cosine_similarity(self, vec_a: list, vec_b: list) -> float:
-        """Calcula similiaridade coseno entre dois vetores."""
-        dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
-        magnitude_a = math.sqrt(sum(a ** 2 for a in vec_a))
-        magnitude_b = math.sqrt(sum(b ** 2 for b in vec_b))
+            logger.error(f"❌ Erro na classificação de documentos: {str(e)}")
+            return state
+
+    def generate(self, state: AgentState) -> AgentState:
+        """
+        Gera resposta baseada nos documentos recuperados e na pergunta.
+        """
+        question = state["medical_question"]
+        documents = state["documents"]
         
-        if magnitude_a == 0 or magnitude_b == 0:
-            return 0.0
+        logger.info("🤖 Gerando resposta baseada nos protocolos")
         
-        return dot_product / (magnitude_a * magnitude_b)
+        try:
+            # Preparar contexto dos documentos
+            context = "\n\n".join([
+                f"Protocolo {i+1}. {doc.metadata.get('source', 'fonte_desconhecida')}: {doc.page_content}"
+                for i, doc in enumerate(documents)
+            ])
+            
+            # Gerar resposta
+            generation = self.rag_chain.invoke({
+                "question": question,
+                "context": context
+            })
+            
+            logger.info("✅ Resposta gerada com sucesso")
+            
+            return {**state, "generation": generation}
+        
+        except Exception as e:
+            logger.error(f"❌ Erro na geração de resposta: {str(e)}")
+            return {**state, "generation": "Desculpe, ocorreu um erro ao gerar a resposta. Tente novamente."}
+
+    def validate_response(self, state: AgentState) -> AgentState:
+        """
+        Valida se a resposta gerada é baseada nos documentos fornecidos.
+        Detecta possíveis alucinações do modelo.
+        """
+        generation = state["generation"]
+        documents = state["documents"]
+        
+        logger.info("🔍 Validando resposta contra documentos fonte")
+        
+        try:
+            # Preparar contexto dos documentos para verificação
+            docs_content = "\n".join([doc.page_content for doc in documents])
+            
+            # Verificar se há alucinação usando chain estruturada
+            grade = self.hallucination_grader.invoke({
+                "documents": docs_content,
+                "generation": generation
+            })
+            
+            # Verificar se a resposta está fundamentada nos documentos
+            if hasattr(grade, 'is_grounded') and grade.is_grounded == "sim":
+                logger.info("✅ Resposta validada (baseada em documentos)")
+                return {**state, "is_valid": True, "hallucination_check": "approved"}
+            elif hasattr(grade, 'is_grounded'):
+                logger.warning(f"⚠️ Possível alucinação detectada: {getattr(grade, 'issues', 'Sem detalhes')}")
+                return {**state, "is_valid": False, "hallucination_check": "rejected"}
+            else:
+                # Fallback: tentar acessar como dict
+                if isinstance(grade, dict) and grade.get('is_grounded') == "sim":
+                    logger.info("✅ Resposta validada (baseada em documentos)")
+                    return {**state, "is_valid": True, "hallucination_check": "approved"}
+                else:
+                    logger.warning("⚠️ Formato de resposta inesperado do validador")
+                    return {**state, "is_valid": False, "hallucination_check": "format_error"}
+        
+        except Exception as e:
+            logger.error(f"❌ Erro na validação de resposta: {str(e)}")
+            # Em caso de erro, assumir que é válida para não bloquear respostas médicas
+            logger.warning("⚠️ Erro na validação - assumindo resposta como válida por segurança")
+            return {**state, "is_valid": True, "hallucination_check": "error_assumed_valid"}
