@@ -15,6 +15,7 @@ O assistente é construído usando:
 
 import sys
 from pathlib import Path
+import uuid
 from typing import Any, Dict
 
 # === CONFIGURAÇÃO DO PROJETO ===
@@ -29,6 +30,7 @@ if str(project_root) not in sys.path:
 # Agora podemos importar os módulos src após configurar o caminho
 from loguru import logger
 
+from src.config import settings
 from src.domain.state import AgentState
 from src.use_cases.graph import GraphBuilder
 from src.utils.logging import setup_logging
@@ -63,6 +65,7 @@ def create_initial_agent_state(user_question: str) -> AgentState:
     - Isso garante consistência de dados em todo o fluxo de trabalho
     """
     return {
+        "request_id": str(uuid.uuid4()),
         # Entrada principal do usuário
         "medical_question": user_question,
         
@@ -70,6 +73,8 @@ def create_initial_agent_state(user_question: str) -> AgentState:
         "is_safe": True,          # Se a pergunta passou pelas verificações de segurança
         "is_valid": True,         # Se a resposta foi validada
         "risk_level": "low",      # Nível de avaliação de risco
+        "requires_human_validation": False,
+        "safety_reason": None,
         
         # Resultados da recuperação de documentos
         "documents": [],          # Protocolos médicos recuperados da base de dados
@@ -341,7 +346,7 @@ def main() -> None:
     uma boa experiência do usuário mesmo quando algo dá errado.
     """
     # Inicializa sistema de logging para depuração e monitoramento
-    setup_logging(level="INFO")
+    setup_logging(level=settings.log_level)
     
     # Exibe mensagem de boas-vindas e informações da aplicação
     display_welcome_message()

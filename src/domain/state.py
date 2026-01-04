@@ -13,6 +13,7 @@ class AgentState(TypedDict):
     Estado do agente RAG para manter contexto durante processamento.
     Todas as chaves são obrigatórias exceto quando marcadas como Optional.
     """
+    request_id: str
     medical_question: str
     
     # Contexto do paciente (se houver)
@@ -26,6 +27,10 @@ class AgentState(TypedDict):
     # Flags de Segurança e Controle
     is_safe: bool
     risk_level: Optional[str]  # Campo para nível de risco
+
+    # Indica se a pergunta pede conduta/prescrição e exige validação humana.
+    requires_human_validation: Optional[bool]
+    safety_reason: Optional[str]
     
     # Controle de histórico e loops
     chat_history: Optional[List[Any]]
