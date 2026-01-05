@@ -24,6 +24,9 @@ def setup_logging(level: str = "INFO") -> None:
     
     # Remover handler padrão do loguru
     logger.remove()
+
+    # Default para campos extras (evita KeyError no format)
+    logger.configure(extra={"request_id": "-"})
     
     # Criar diretório de logs se não existir
     log_dir = Path("logs")
@@ -32,6 +35,7 @@ def setup_logging(level: str = "INFO") -> None:
     # Formato estruturado para logs em console
     console_format = (
         "<level>{level: <8}</level> | "
+        "req=<cyan>{extra[request_id]}</cyan> | "
         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
         "<level>{message}</level>"
     )
@@ -40,6 +44,7 @@ def setup_logging(level: str = "INFO") -> None:
     file_format = (
         "{time:YYYY-MM-DD HH:mm:ss} | "
         "{level: <8} | "
+        "req={extra[request_id]} | "
         "{name}:{function}:{line} - "
         "{message}"
     )

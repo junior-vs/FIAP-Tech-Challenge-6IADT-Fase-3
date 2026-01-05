@@ -23,6 +23,8 @@ class LLMFactory:
                     temperature=settings.temperature,
                     top_p=0.95,
                     max_output_tokens=2048,
+                    request_timeout=settings.request_timeout,
+                    retries=settings.retries,
                 )
                 logger.info(f"✅ {settings.model_name} inicializado com sucesso")
             except Exception as e:
@@ -45,6 +47,7 @@ class LLMFactory:
                 cls._embeddings_instance = GoogleGenerativeAIEmbeddings(
                     model="models/embedding-001",
                     google_api_key=settings.gemini_api_key,
+                    request_options={"timeout": settings.request_timeout},
                 )
                 logger.info("✅ Embeddings inicializados com sucesso")
             except Exception as e:

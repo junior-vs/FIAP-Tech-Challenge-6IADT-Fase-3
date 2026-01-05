@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     gemini_api_key: str              # Obrigatório (sem default)
     model_name: str = "gemini-2.0-flash"                  # Obrigatório (sem default)
     temperature: float = 0.0               # Obrigatório (sem default)
+
+    # ===== Logging =====
+    log_level: str = "INFO"
+
+    # ===== Gemini Client Reliability =====
+    # Evita que chamadas ao provedor fiquem presas indefinidamente.
+    request_timeout: float = 30.0
+    retries: int = 2
     
     # ===== Vector Store Configuration (Chroma) =====
     vector_db_path: str = "data/chroma_db"

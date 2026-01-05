@@ -85,6 +85,10 @@ class GuardrailsValidator:
         
         logger.info("✅ Pergunta passou em todas as validações")
         return True
+
+    def validate_with_result(self, question: str) -> GuardrailsValidationResult:
+        """Retorna o resultado detalhado das validações (para auditoria e UX)."""
+        return self._run_validations(question)
     
     def _run_validations(self, question: str) -> GuardrailsValidationResult:
         """Executa todas as validações em sequência."""
