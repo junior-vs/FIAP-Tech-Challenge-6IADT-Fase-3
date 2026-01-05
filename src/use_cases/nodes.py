@@ -34,7 +34,10 @@ class RAGNodes:
             r"\bprescrev\w+\b",
             r"\breceit\w+\b",
             r"\bposolog\w+\b",
-            r"\bdose\b",
+            # Padrões mais específicos para "dose" para evitar falsos positivos
+            r"\bqual\s+(é|e|seria)\s+a\s+dose\b",
+            r"\bdose\s+(de|para)\s+[a-zA-Zà-úÀ-Ú]+\b",
+            r"\bdose\s+(diári\w*|diaria|diárias|maxim\w*|máxim\w*)\b",
             r"\bmg\b",
             r"\bml\b",
             r"\bvia\s+(oral|iv|im|sc|subcut)\w*\b",
