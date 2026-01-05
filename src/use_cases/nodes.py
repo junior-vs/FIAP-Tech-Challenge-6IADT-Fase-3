@@ -13,7 +13,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.domain.state import AgentState
-from src.domain.guardrails import GuardrailsGrade, HallucinationGrade, DocumentGrade
+from src.domain.guardrails import GuardrailsGrade, HallucinationGrade, DocumentGrade, GuardrailsValidationResult
 from src.domain.guardrails import GuardrailsValidator
 from src.infrastructure.llm_factory import LLMFactory
 from src.infrastructure.vector_store import VectorStoreRepository
