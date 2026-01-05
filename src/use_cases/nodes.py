@@ -173,7 +173,7 @@ Responda no formato JSON especificado com:
     def _sanitize_generation_for_grounding_check(self, generation: str) -> str:
         """Remove trechos padronizados que não precisam estar nas fontes.
 
-        A checagem de groundedness deve focar no conteúdo factual/clinico.
+        A checagem de groundedness deve focar no conteúdo factual/clínico.
         Disclaimers, avisos de segurança e a lista de fontes podem causar falso
         positivo, já que não aparecem literalmente no corpo dos documentos.
         """
