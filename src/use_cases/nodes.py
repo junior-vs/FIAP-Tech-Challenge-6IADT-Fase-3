@@ -35,15 +35,23 @@ class RAGNodes:
             r"\bprescrev\w+\b",
             r"\breceit\w+\b",
             r"\bposolog\w+\b",
+            r"\bprescrib\w+\b",
+            r"\bprescription\b",
+            r"\bdosage\b",
+            r"\bdosing\b",
             # Padrões mais específicos para "dose" para evitar falsos positivos
             r"\bqual\s+(é|e|seria)\s+a\s+dose\b",
             r"\bdose\s+(de|para)\s+[a-zA-Zà-úÀ-Ú]+\b",
             r"\bdose\s+(diári\w*|diaria|diárias|maxim\w*|máxim\w*)\b",
+            r"\bwhat\s+(is|'s)\s+the\s+dose\b",
+            r"\bwhat\s+dosage\b",
+            r"\bhow\s+many\s+(mg|ml)\b",
             r"\bmg\b",
             r"\bml\b",
             r"\bvia\s+(oral|iv|im|sc|subcut)\w*\b",
             r"\bquantas\s+vezes\b",
             r"\ba\s+cada\s+\d+\s*(h|horas)\b",
+            r"\bevery\s+\d+\s*(h|hours)\b",
         ]
 
         # Chain/Prompt para validação de guardrails com prompt aprimorado
@@ -159,6 +167,12 @@ IMPORTANTE: Esta é uma ferramenta de apoio à decisão médica. Sempre recomend
 
 Analise se a resposta contém APENAS informações presentes nos documentos ou se há conteúdo adicional não fundamentado.
 
+IMPORTANTE: Ignore trechos padronizados que não precisam constar literalmente nos documentos, como:
+- avisos/disclaimers de segurança (ex: "IMPORTANTE: ...", "IMPORTANT: ...", "isso não substitui...", "always recommend consultation...")
+- listas de fontes adicionadas pelo sistema (ex: seção "Fontes:")
+
+Foque a verificação no conteúdo factual/clínico (afirmações sobre condição, diagnóstico, conduta, exames, etc.).
+
 Responda no formato JSON especificado com:
 - is_grounded: "sim" se a resposta está totalmente baseada nos documentos, "não" se contém informações extras
 - confidence: seu nível de confiança na avaliação
@@ -203,10 +217,13 @@ Responda no formato JSON especificado com:
         disclaimer_patterns = [
             r"\n?\s*⚠️\s*Observação:.*$",
             r"\n?\s*Observa(c|ç)ão:.*$",
-            r"\n?\s*IMPORTANTE:.*$",
+            r"\n?\s*IMPORTANTE\b.*$",
+            r"\n?\s*IMPORTANT\b.*$",
             r"\n?\s*Esta\s+é\s+uma\s+ferramenta\s+de\s+apoio\s+à\s+decisão\s+médica\..*$",
+            r"\n?\s*This\s+is\s+a\s+tool\s+to\s+support\s+medical\s+decisions\..*$",
             r"\n?\s*Isso\s+n(ã|a)o\s+substitui\s+.*$",
             r"\n?\s*Sempre\s+recomende\s+consulta\s+.*$",
+            r"\n?\s*Always\s+recommend\s+consultation\s+.*$",
             r"\n?\s*Procure\s+(um|uma)\s+profissional\s+de\s+sa(ú|u)de\..*$",
         ]
         for pattern in disclaimer_patterns:

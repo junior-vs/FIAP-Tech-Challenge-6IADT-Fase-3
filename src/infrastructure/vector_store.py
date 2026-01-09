@@ -203,6 +203,35 @@ class VectorStoreRepository:
                     collection_name="medical_protocols"
                 )
                 logger.info("✅ Vectorstore carregado")
+
+                # Se existir DB mas estiver vazio, popula automaticamente.
+                try:
+                    existing_count = vector_store._collection.count()  # type: ignore[attr-defined]
+                except Exception:
+                    existing_count = None
+
+                if existing_count == 0:
+                    logger.warning(
+                        "⚠️ Vectorstore existente está vazio (0 chunks). Reindexando base de conhecimento..."
+                    )
+                    documents = self._load_documents()
+                    if not documents:
+                        logger.warning(
+                            "⚠️ Nenhum documento encontrado na base de conhecimento; vectorstore permanecerá vazio."
+                        )
+                    else:
+                        chunks = self._chunk_documents(documents)
+                        vector_store.add_documents(chunks)
+                        # Algumas versões expõem persist(), outras persistem automaticamente.
+                        persist_fn = getattr(vector_store, "persist", None)
+                        if callable(persist_fn):
+                            persist_fn()
+
+                        try:
+                            new_count = vector_store._collection.count()  # type: ignore[attr-defined]
+                        except Exception:
+                            new_count = None
+                        logger.info(f"✅ Vectorstore populado (chunks={new_count})")
             else:
                 logger.info("🆕 Criando novo banco vetorial...")
                 documents = self._load_documents()
