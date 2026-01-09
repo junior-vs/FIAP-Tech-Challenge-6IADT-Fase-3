@@ -9,10 +9,13 @@ import os
 import xml.etree.ElementTree as ET
 from typing import List
 
+# Desabilitar symlinks warning no Windows
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.config import settings
@@ -29,17 +32,28 @@ class VectorStoreRepository:
         self.vector_store = self._initialize_vectorstore()
 
     def _get_embeddings(self):
-        """Inicializa embeddings do Google Generative AI."""
+        """Inicializa embeddings com SentenceTransformer (sem limites de quota)."""
         logger.info("🔄 Inicializando embeddings...")
         try:
-            embeddings = GoogleGenerativeAIEmbeddings(
-                model="models/embedding-001",
-                google_api_key=settings.gemini_api_key # type: ignore
-            )
-            logger.info("✅ Embeddings inicializados")
+            # Usar SentenceTransformer diretamente (mais robusto no Windows)
+            from sentence_transformers import SentenceTransformer
+            from langchain_core.embeddings import Embeddings
+            
+            model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+            
+            # Wrapper simples para LangChain
+            class CustomEmbeddings(Embeddings):
+                def embed_documents(self, texts):
+                    return model.encode(texts, convert_to_numpy=True).tolist()
+                def embed_query(self, text):
+                    return model.encode(text, convert_to_numpy=True).tolist()
+            
+            embeddings = CustomEmbeddings()
+            logger.info("✅ Embeddings inicializados (SentenceTransformer - sem quota limits)")
             return embeddings
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar embeddings: {e}")
+            logger.error(f"   Para corrigir, execute: python scripts/download_embeddings.py")
             raise
 
     def _load_medquad_xml(self, file_path: str) -> List[Document]:

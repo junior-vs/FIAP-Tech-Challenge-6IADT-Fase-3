@@ -28,6 +28,7 @@ class RAGNodes:
     def __init__(self, retriever, llm):
         self.retriever = retriever
         self.llm = llm
+        self.is_local_llm = getattr(llm, "is_local_llama", False)
         self.local_guardrails = GuardrailsValidator()
 
         self._prescription_patterns = [
@@ -45,7 +46,7 @@ class RAGNodes:
             r"\ba\s+cada\s+\d+\s*(h|horas)\b",
         ]
 
-        # Chain para validação de guardrails com prompt aprimorado
+        # Chain/Prompt para validação de guardrails com prompt aprimorado
         self.guardrails_prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
@@ -80,8 +81,6 @@ Responda apenas com:
             ("human", "Pergunta: {question}"),
         ])
 
-        self.guardrails_chain = self.guardrails_prompt | self.llm | StrOutputParser()
-
         # Chain para validação estruturada (backup)
         self.structured_guardrails_prompt = ChatPromptTemplate.from_messages([
             (
@@ -105,12 +104,15 @@ Responda no formato JSON especificado.""",
             ("human", "Pergunta: {question}"),
         ])
 
-        self.structured_guardrails_chain = (
-            self.structured_guardrails_prompt | self.llm.with_structured_output(GuardrailsGrade)
-        )
+        # Se o LLM fornecer integração com LangChain (remoto), montamos as chains.
+        if not self.is_local_llm:
+            self.guardrails_chain = self.guardrails_prompt | self.llm | StrOutputParser()
+            self.structured_guardrails_chain = (
+                self.structured_guardrails_prompt | self.llm.with_structured_output(GuardrailsGrade)
+            )
 
-        # Chain para classificação de documentos
-        self.grader_prompt = ChatPromptTemplate.from_messages([
+            # Chain para classificação de documentos
+            self.grader_prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
                 """Você é um classificador que avalia se um documento recuperado é relevante para uma pergunta médica.
@@ -122,10 +124,10 @@ Responda no formato JSON especificado.""",
             ("human", "Pergunta: {question}\n\nDocumento: {document}"),
         ])
 
-        self.retrieval_grader = self.grader_prompt | self.llm.with_structured_output(DocumentGrade)
+            self.retrieval_grader = self.grader_prompt | self.llm.with_structured_output(DocumentGrade)
 
-        # Chain para geração de respostas
-        self.rag_prompt = ChatPromptTemplate.from_messages([
+            # Chain para geração de respostas
+            self.rag_prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
                 """Você é um assistente médico especializado que fornece informações baseadas em protocolos clínicos.
@@ -147,10 +149,10 @@ IMPORTANTE: Esta é uma ferramenta de apoio à decisão médica. Sempre recomend
             ("human", "Pergunta: {question}\n\nContexto dos protocolos:\n{context}"),
         ])
 
-        self.rag_chain = self.rag_prompt | self.llm | StrOutputParser()
+            self.rag_chain = self.rag_prompt | self.llm | StrOutputParser()
 
-        # Chain para detecção de alucinações
-        self.hallucination_prompt = ChatPromptTemplate.from_messages([
+            # Chain para detecção de alucinações
+            self.hallucination_prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
                 """Você é um verificador que determina se uma resposta do LLM está baseada nos documentos fornecidos.
@@ -165,9 +167,16 @@ Responda no formato JSON especificado com:
             ("human", "Documentos: {documents}\n\nResposta do LLM: {generation}"),
         ])
 
-        self.hallucination_grader = (
-            self.hallucination_prompt | self.llm.with_structured_output(HallucinationGrade)
-        )
+            self.hallucination_grader = (
+                self.hallucination_prompt | self.llm.with_structured_output(HallucinationGrade)
+            )
+        else:
+            # Para LLMs locais, mantemos os atributos em None e usaremos fallbacks nas funções
+            self.guardrails_chain = None
+            self.structured_guardrails_chain = None
+            self.retrieval_grader = None
+            self.rag_chain = None
+            self.hallucination_grader = None
 
     def _needs_human_validation(self, question: str) -> bool:
         q = question.lower()
@@ -239,6 +248,38 @@ Responda no formato JSON especificado com:
             }
         
         try:
+            # Se for LLM local, usar chamada direta como fallback simples
+            if self.is_local_llm:
+                prompt = (
+                    "Você é um classificador especializado em identificar perguntas médicas. "
+                    + "Analise a pergunta e responda apenas com 'válida' ou 'inválida'.\n\n"
+                    + f"Pergunta: {question}\n"
+                )
+                try:
+                    result = self.llm.generate(prompt)
+                    result_clean = result.strip().lower()
+                    is_valid = any(term in result_clean for term in ['válida', 'valid', 'sim', 'yes', 'aceita', 'accept'])
+                    is_invalid = any(term in result_clean for term in ['inválida', 'invalid', 'não', 'no', 'rejeita', 'reject'])
+
+                    if is_valid and not is_invalid:
+                        log.info("Segurança: aprovada pelo classificador (local)")
+                        return {**state, "is_safe": True, "risk_level": "baixo"}
+                    elif is_invalid and not is_valid:
+                        log.warning("Segurança: bloqueada pelo classificador (local)")
+                        return {
+                            **state,
+                            "is_safe": False,
+                            "risk_level": "alto",
+                            "safety_reason": "Pergunta fora do escopo médico.",
+                            "generation": "Desculpe, mas essa pergunta está fora do escopo médico que posso ajudar. Por favor, faça uma pergunta relacionada à saúde ou medicina."
+                        }
+                    else:
+                        log.info("Segurança: resultado ambíguo (local); assumindo válida")
+                        return {**state, "is_safe": True, "risk_level": "baixo"}
+                except Exception as e:
+                    log.error(f"Segurança: erro ao chamar LLM local ({e})")
+                    return {**state, "is_safe": True, "risk_level": "baixo"}
+
             # Primeira tentativa com chain simples
             try:
                 result = self.guardrails_chain.invoke({"question": question})
@@ -342,6 +383,11 @@ Responda no formato JSON especificado com:
         log.info(f"Relevância: avaliando {len(documents)} documentos")
         
         try:
+            # Se LLM local, pular classificação sofisticada e aplicar heurística simples
+            if self.retrieval_grader is None:
+                log.info("Relevância: LLM local detectado, usando heurística simples (mantendo documentos)")
+                return {**state, "documents": documents}
+
             filtered_docs = []
             
             for doc in documents:
@@ -386,12 +432,24 @@ Responda no formato JSON especificado com:
                 f"Protocolo {i+1}. {doc.metadata.get('source', 'fonte_desconhecida')}: {doc.page_content}"
                 for i, doc in enumerate(documents)
             ])
-            
             # Gerar resposta
-            generation = self.rag_chain.invoke({
-                "question": question,
-                "context": context
-            })
+            if self.rag_chain is None:
+                # Prompt simples para LLM local
+                system_instr = (
+                    "Você é um assistente médico especializado que fornece informações baseadas em protocolos clínicos. "
+                    "Use APENAS as informações dos protocolos fornecidos no contexto. Cite as fontes quando possível."
+                )
+                prompt = f"{system_instr}\n\nPergunta: {question}\n\nContexto dos protocolos:\n{context}\n\nResposta:"
+                try:
+                    generation = self.llm.generate(prompt)
+                except Exception as e:
+                    log.error(f"Resposta: erro ao gerar com LLM local ({e})")
+                    generation = "Desculpe, ocorreu um erro ao gerar a resposta. Tente novamente."
+            else:
+                generation = self.rag_chain.invoke({
+                    "question": question,
+                    "context": context
+                })
 
             # Explainability: anexar fontes usadas, mesmo se o LLM não citar corretamente.
             sources = []
@@ -438,7 +496,24 @@ Responda no formato JSON especificado com:
 
             # Focar a checagem no conteúdo factual; ignorar trechos padronizados.
             generation_for_check = self._sanitize_generation_for_grounding_check(generation)
-            
+            # Se LLM local, fazer checagem simples perguntando se a resposta está nas fontes
+            if self.hallucination_grader is None:
+                prompt = (
+                    f"Documentos: {docs_content}\n\nResposta do LLM: {generation_for_check}\n\n"
+                    "A resposta acima contém apenas informações presentes nos documentos fornecidos? Responda apenas 'sim' ou 'não'."
+                )
+                try:
+                    check = self.llm.generate(prompt).strip().lower()
+                    if any(t in check for t in ['sim', 'yes']):
+                        log.info("Confiabilidade: ok (local)")
+                        return {**state, "is_valid": True, "hallucination_check": "approved"}
+                    else:
+                        log.warning("Confiabilidade: rejeitada (local)")
+                        return {**state, "is_valid": False, "hallucination_check": "rejected"}
+                except Exception as e:
+                    log.error(f"Confiabilidade: erro ao chamar LLM local ({e})")
+                    return {**state, "is_valid": True, "hallucination_check": "error_assumed_valid"}
+
             # Verificar se há alucinação usando chain estruturada
             grade = self.hallucination_grader.invoke({
                 "documents": docs_content,

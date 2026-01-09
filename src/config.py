@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # ===== LLM Configuration =====
     gemini_api_key: str              # Obrigatório (sem default)
     model_name: str = "gemini-2.0-flash"                  # Obrigatório (sem default)
+    # model_name: str = "tunedModels/medical-assistant-ft-abc123xyz"  # Após a execução do fine-tuning, inserir o model_id aqui e utilizar este modelo.
     temperature: float = 0.0               # Obrigatório (sem default)
 
     # ===== Logging =====
