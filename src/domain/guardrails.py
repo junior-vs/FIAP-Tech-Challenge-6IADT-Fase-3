@@ -34,7 +34,7 @@ class GuardrailsValidator:
         "cnpj": r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}",
         "phone": r"(\+\d{1,3})?\s?\(?\d{2}\)?\s?\d{4,5}-?\d{4}",
         "email": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-        "patient_name": r"(?i)(paciente|patient|Sr\.|Dra?\.|Mrs?\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*",
+        "patient_name": r"(?i:(paciente|patient|sr\.|sra\.|dra?\.|mrs?\.))\s+([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+)*)",
     }
     
     # Termos médicos mínimos para relevância
@@ -48,14 +48,31 @@ class GuardrailsValidator:
         "dispneia", "tosse", "náusea", "vômito", "diarreia", "anemia",
         "angiografia", "radiografia", "ressonância", "ultrassom", "tomografia",
         "análise", "exame", "laboratorio", "teste", "cultura", "hemograma",
-        "idoso", "geriátrico", "criança", "neonato", "gestante", "pós-operatório"
+        "idoso", "geriátrico", "criança", "neonato", "gestante", "pós-operatório",
+
+        # English
+        "diagnosis", "symptom", "symptoms", "treatment", "protocol",
+        "medication", "medicine", "drug", "therapy", "patient", "health", "disease",
+        "infection", "inflammation", "allergy", "surgery", "hospital",
+        "doctor", "physician", "clinical",
+        "blood pressure", "diabetes", "hypertension", "sepsis", "pneumonia",
+        "heart", "cardiac", "renal", "kidney", "hepatic", "liver",
+        "antibiotic", "vaccination", "vaccine", "fever", "pain", "fatigue",
+        "dyspnea", "shortness of breath", "cough", "nausea", "vomiting", "diarrhea", "anemia",
+        "x-ray", "radiograph", "mri", "ultrasound", "ct", "tomography",
+        "lab", "laboratory", "test", "culture", "cbc",
+        "elderly", "geriatric", "child", "children", "neonate", "pregnant", "postoperative"
     }
     
     # Tópicos explicitamente não-médicos
     NON_MEDICAL_TOPICS = {
         "receita", "brigadeiro", "bolo", "livro", "romance", "filme",
         "política", "economia", "futebol", "música", "história",
-        "matemática", "física", "programação", "código", "javascript"
+        "matemática", "física", "programação", "código", "javascript",
+
+        # English
+        "recipe", "cake", "book", "novel", "movie", "politics", "economics",
+        "soccer", "music", "history", "math", "physics", "programming"
     }
     
     def __init__(self):
